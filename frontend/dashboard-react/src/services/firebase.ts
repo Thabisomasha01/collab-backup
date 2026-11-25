@@ -30,6 +30,10 @@ export const apiBaseUrl = (
     : configuredApiBaseUrl || 'https://collab-backup-backend.onrender.com'
 ).replace(/\/+$/, '');
 
+export const socketBaseUrl = import.meta.env.DEV
+  ? 'https://collab-backup-backend.onrender.com'
+  : apiBaseUrl;
+
 export async function markCurrentUserOffline(): Promise<void> {
   const user = firebaseAuth.currentUser;
   if (!user) return;

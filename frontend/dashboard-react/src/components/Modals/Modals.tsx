@@ -1875,20 +1875,24 @@ const TaskEditorModal: React.FC<{
       }}
     >
       <form
-        className="modal project-task-parent-form"
-        style={{ maxWidth: '640px', width: 'min(640px, calc(100vw - 32px))' }}
+        className="modal project-task-parent-form project-task-editor-modal"
         onSubmit={handleSubmit}
       >
-        <button type="button" className="close-modal" aria-label="Close" onClick={closeModal}>
-          ×
-        </button>
+        <div className="project-task-editor-header">
+          <div>
+            <span className="messages-create-eyebrow">
+              {isEdit ? 'EDIT TASK' : 'NEW DELIVERABLE'}
+            </span>
+            <h2>{isEdit ? 'Edit Task Details' : 'Create Project Task'}</h2>
+            <p className="modal-copy">
+              Set deliverables, schedule dates, sprint assignment, priority, and media context.
+            </p>
+          </div>
+          <button type="button" className="close-modal" aria-label="Close" onClick={closeModal}>
+            ×
+          </button>
+        </div>
         <div className="modal-body">
-          <p className="eyebrow">{isEdit ? 'EDIT TASK' : 'NEW DELIVERABLE'}</p>
-          <h2>{isEdit ? 'Edit Task Details' : 'Create Project Task'}</h2>
-          <p className="modal-copy">
-            Set deliverables, schedule dates, sprint assignment, priority, and media context.
-          </p>
-
           <label>
             Project Board
             <select
@@ -2069,32 +2073,34 @@ const TaskEditorModal: React.FC<{
               <div className="cal-schedule-title">
                 <span>🗓️ Due Date / Schedule Timeline</span>
               </div>
+            </div>
+            <div className="cal-schedule-control-row">
               <div className="cal-schedule-summary">
                 <strong>
                   {formatRelativeDate(dueDate)} ({Math.max(1, getDateDayOffset(dueDate, parseLocalDate(startDate)) + 1)}d)
                 </strong>
               </div>
-            </div>
-            <div className="cal-schedule-presets">
-              {presets.map((p) => {
-                const ps = clampDate(p.start);
-                let pd = clampDate(p.due);
-                if (pd < ps) pd = ps;
-                const active = ps === startDate && pd === dueDate;
-                return (
-                  <button
-                    key={p.label}
-                    type="button"
-                    className={`cal-preset-pill ${active ? 'active' : ''}`}
-                    onClick={() => {
-                      setStartDate(ps);
-                      setDueDate(pd);
-                    }}
-                  >
-                    {p.label}
-                  </button>
-                );
-              })}
+              <div className="cal-schedule-presets">
+                {presets.map((p) => {
+                  const ps = clampDate(p.start);
+                  let pd = clampDate(p.due);
+                  if (pd < ps) pd = ps;
+                  const active = ps === startDate && pd === dueDate;
+                  return (
+                    <button
+                      key={p.label}
+                      type="button"
+                      className={`cal-preset-pill ${active ? 'active' : ''}`}
+                      onClick={() => {
+                        setStartDate(ps);
+                        setDueDate(pd);
+                      }}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <DualDateRangeCalendars
               startDate={startDate}

@@ -43,6 +43,7 @@
 .carousel-btn,
 .team-add-btn,
 .mini-filter-btn,
+.create-task-button,
 .segmented-tab,
 .assign-ghost-btn,
 .add-subtask-inner button,
@@ -52,6 +53,17 @@
   font: inherit;
   cursor: pointer;
   transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.metrics-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.metrics-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .kpi-grid {
@@ -643,6 +655,30 @@
   padding: 3px;
   border-radius: 8px;
   background: var(--surface-soft);
+}
+
+.recent-tasks-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.create-task-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 0;
+  border: 0;
+  color: var(--ink-700);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.create-task-button:hover {
+  color: var(--blue-700);
 }
 
 .mini-filter-btn {

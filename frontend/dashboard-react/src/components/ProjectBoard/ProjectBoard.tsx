@@ -269,27 +269,6 @@ export const ProjectBoard: React.FC = () => {
     [selectedTaskProject, selectedTaskBase, setTasks, showDashboardToast]
   );
 
-  const handleAddSubtask = useCallback(
-    (taskId: string | number, title: string) => {
-      const key = String(selectedTaskBase?.taskId || taskId);
-      setSubtasksByTask((prev) => {
-        const existing = prev[key] || [];
-        return {
-          ...prev,
-          [key]: [
-            ...existing,
-            {
-              id: `sub-${Date.now()}`,
-              title,
-              done: false
-            }
-          ]
-        };
-      });
-    },
-    [selectedTaskBase]
-  );
-
   const handleToggleSubtask = useCallback(
     (taskId: string | number, subtaskId: string) => {
       const key = String(selectedTaskBase?.taskId || taskId);
@@ -341,7 +320,6 @@ export const ProjectBoard: React.FC = () => {
         onAddComment={(tid, text) => {
           void handleAddComment(tid, text);
         }}
-        onAddSubtask={handleAddSubtask}
         onToggleSubtask={handleToggleSubtask}
         onUploadAttachment={handleUploadAttachment}
       />

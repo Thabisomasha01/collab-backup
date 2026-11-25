@@ -176,6 +176,51 @@
 
 }
 
+:global(.project-task-editor-modal) .task-media-picker {
+
+    justify-content: center;
+    gap: 0;
+
+}
+
+:global(.project-task-editor-modal) .task-media-action {
+
+    justify-content: center;
+    min-height: 36px;
+    padding: 6px 9px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    font-size: 12px;
+    transition: color 160ms ease, transform 160ms ease;
+
+}
+
+:global(.project-task-editor-modal) .task-media-action-icon svg {
+
+    width: 27px;
+    height: 27px;
+
+}
+
+:global(.project-task-editor-modal) .task-media-action + .task-media-action::before {
+
+    content: '|';
+    margin-right: 9px;
+    color: var(--muted);
+    font-weight: 400;
+
+}
+
+:global(.project-task-editor-modal) .task-media-action:hover:not(:disabled) {
+
+    border: 0;
+    background: transparent;
+    color: var(--ink);
+    transform: scale(1.06);
+
+}
+
 .task-media-action:disabled {
 
     opacity: .6;
@@ -268,6 +313,31 @@
 
     border-color: #3F3F46;
     background: #222228;
+    color: #F4F4F5;
+
+}
+
+:global(body.dark-mode) :global(.project-task-editor-modal) .task-media-action,
+:global([data-theme="dark"]) :global(.project-task-editor-modal) .task-media-action {
+
+    border: 0;
+    background: transparent;
+    color: #F4F4F5;
+
+}
+
+:global(body.dark-mode) :global(.project-task-editor-modal) .task-media-action + .task-media-action::before,
+:global([data-theme="dark"]) :global(.project-task-editor-modal) .task-media-action + .task-media-action::before {
+
+    color: #A1A1AA;
+
+}
+
+:global(body.dark-mode) :global(.project-task-editor-modal) .task-media-action:hover:not(:disabled),
+:global([data-theme="dark"]) :global(.project-task-editor-modal) .task-media-action:hover:not(:disabled) {
+
+    border: 0;
+    background: transparent;
     color: #F4F4F5;
 
 }

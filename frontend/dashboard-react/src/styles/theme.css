@@ -3988,6 +3988,18 @@ body.dark-mode select option:checked, [data-theme="dark"] select option:checked 
 
 }
 
+.project-task-editor-header {
+
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 20px 60px 18px 24px;
+    border-radius: 15px 15px 0 0;
+    background: #000000;
+
+}
+
 
 .messages-create-eyebrow {
 
@@ -4007,8 +4019,25 @@ body.dark-mode select option:checked, [data-theme="dark"] select option:checked 
 
 }
 
+.project-task-editor-modal h2 {
+
+    color: #FFFFFF;
+    font-size: 21px;
+    line-height: 1.25;
+
+}
+
 
 .messages-create-modal .modal-copy {
+
+    margin: 0;
+    color: #D4D4D8;
+    font-size: 13px;
+    line-height: 1.5;
+
+}
+
+.project-task-editor-header .modal-copy {
 
     margin: 0;
     color: #D4D4D8;
@@ -4033,8 +4062,30 @@ body.dark-mode select option:checked, [data-theme="dark"] select option:checked 
 
 }
 
+.project-task-editor-header .close-modal {
+
+    top: 18px;
+    right: 18px;
+    display: grid;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+    border-radius: 9px;
+    background: #27272A;
+    color: #FFFFFF;
+    font-size: 22px;
+
+}
+
 
 .messages-create-modal .close-modal:hover {
+
+    background: #3F3F46;
+    color: #FFFFFF;
+
+}
+
+.project-task-editor-header .close-modal:hover {
 
     background: #3F3F46;
     color: #FFFFFF;

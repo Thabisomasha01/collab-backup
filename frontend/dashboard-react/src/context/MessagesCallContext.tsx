@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState
 } from 'react';
-import { api, apiBaseUrl } from '../services/api';
+import { api, socketBaseUrl } from '../services/api';
 import type { ChatAttachment, ChatMessage, Conversation } from '../types/dashboard';
 import { getAvatarSource, getUserInitials, useDashboard } from './DashboardContext';
 
@@ -168,7 +168,7 @@ function loadSocketIoClient(): Promise<void> {
 
   socketScriptPromise = new Promise((resolve, reject) => {
     const script = document.createElement('script');
-    script.src = `${apiBaseUrl}/socket.io/socket.io.js`;
+    script.src = `${socketBaseUrl}/socket.io/socket.io.js`;
     script.async = true;
     script.onload = () => resolve();
     script.onerror = () => {
@@ -1574,7 +1574,7 @@ export const MessagesCallProvider: React.FC<{ children: React.ReactNode }> = ({ 
         if (cancelled || !window.io) return;
         const token = await firebaseUser.getIdToken();
         if (cancelled) return;
-        const socket = window.io(apiBaseUrl, {
+        const socket = window.io(socketBaseUrl, {
           auth: { token },
           autoConnect: false,
           reconnection: true,
