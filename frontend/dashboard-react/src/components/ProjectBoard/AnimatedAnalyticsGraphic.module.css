@@ -1,0 +1,20 @@
+.analytics-graphic {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  place-items: center;
+  color: #000000;
+}
+
+.graph-icon {
+  display: block;
+  width: 22px;
+  height: 22px;
+  overflow: visible;
+}
+
+.complete-icon {
+  width: 30px;
+  height: 30px;
+}

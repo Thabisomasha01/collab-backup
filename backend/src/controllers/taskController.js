@@ -1,0 +1,1933 @@
+const { randomUUID } = require('node:crypto');
+const { pool, query } = require('../config/db');
+
+const MAX_TASK_SUBMISSION_MEDIA_BYTES = 100 * 1024 * 1024;
+const MAX_TASK_SUBMISSION_ATTACHMENTS = 10;
+
+const sprintMemberUids = sprint => {
+    const members = Array.isArray(sprint?.memberFirebaseUids)
+        ? sprint.memberFirebaseUids
+        : Array.isArray(sprint?.member_firebase_uids)
+            ? sprint.member_firebase_uids
+            : [sprint?.assigneeFirebaseUid || sprint?.assignee_firebase_uid];
+    return [...new Set(members
+        .filter(uid => typeof uid === 'string')
+        .map(uid => uid.trim())
+        .filter(Boolean))];
+};
+
+const projectSprintMemberUids = project => [...new Set(
+    (Array.isArray(project?.sprints) ? project.sprints : [])
+        .flatMap(sprintMemberUids)
+)];
+
+const normalizeTaskSubmissionAttachments = value => {
+    if (value === undefined) return { attachments: [], error: null };
+    if (!Array.isArray(value) || value.length > MAX_TASK_SUBMISSION_ATTACHMENTS) {
+        return {
+            attachments: [],
+            error: `Attach no more than ${MAX_TASK_SUBMISSION_ATTACHMENTS} files.`
+        };
+    }
+
+    let totalBytes = 0;
+    const attachments = [];
+    for (const item of value) {
+        const fileName = typeof item?.fileName === 'string' ? item.fileName.trim() : '';
+        const mediaType = typeof item?.mediaType === 'string' ? item.mediaType.toLowerCase() : '';
+        const data = typeof item?.data === 'string' ? item.data : '';
+        const isSupportedType = /^(image\/(?!svg\+xml(?:$|;))[a-z0-9.+-]+|audio\/[a-z0-9.+-]+|video\/[a-z0-9.+-]+|application\/[a-z0-9.+_-]+|text\/(?!html(?:$|;))[a-z0-9.+-]+|font\/[a-z0-9.+-]+)$/.test(mediaType);
+        const dataMatch = data.match(/^data:([^;,]+)(?:;codecs=[^;,]+)?;base64,([A-Za-z0-9+/]*={0,2})$/);
+        if (!fileName || fileName.length > 255 || /[\u0000-\u001f\u007f]/.test(fileName) ||
+            !isSupportedType || !dataMatch || dataMatch[1].toLowerCase() !== mediaType) {
+            return { attachments: [], error: 'One or more attachments are invalid or use an unsupported file type.' };
+        }
+
+        const encoded = dataMatch[2];
+        const buffer = Buffer.from(encoded, 'base64');
+        if (!buffer.length || buffer.toString('base64') !== encoded) {
+            return { attachments: [], error: 'One or more attachments contain invalid file data.' };
+        }
+        totalBytes += buffer.length;
+        if (totalBytes > MAX_TASK_SUBMISSION_MEDIA_BYTES) {
+            return { attachments: [], error: 'Task submission attachments must total 100 MB or less.' };
+        }
+        attachments.push({
+            fileName,
+            mediaType,
+            size: buffer.length,
+            data,
+            ...(item.is_voice_note === true ? { is_voice_note: true } : {})
+        });
+    }
+    return { attachments, error: null };
+};
+
+const normalizeTaskSubmissionLinks = value => {
+    if (value === undefined) return { links: [], error: null };
+    if (!Array.isArray(value) || value.length > 10) {
+        return { links: [], error: 'Add no more than 10 links.' };
+    }
+
+    const links = [];
+    for (const item of value) {
+        if (typeof item !== 'string' || item.length > 2048) {
+            return { links: [], error: 'One or more submission links are invalid.' };
+        }
+        let url;
+        try {
+            url = new URL(item.trim());
+        } catch {
+            return { links: [], error: 'Enter valid links that start with https:// or http://.' };
+        }
+        if (!['http:', 'https:'].includes(url.protocol) || !url.hostname) {
+            return { links: [], error: 'Enter valid links that start with https:// or http://.' };
+        }
+        links.push(url.toString());
+    }
+    return { links: [...new Set(links)], error: null };
+};
+
+const allowedStatuses = new Set(['Backlog', 'To do', 'In progress', 'Blocked', 'Done']);
+const allowedPriorities = new Set(['low', 'medium', 'high']);
+const allowedTaskTags = new Set([
+    'Accessibility',
+    'Blocked',
+    'Bug',
+    'Content',
+    'Customer Request',
+    'Design',
+    'Documentation',
+    'Enhancement',
+    'Feature',
+    'Follow-up',
+    'Infrastructure',
+    'Needs Review',
+    'Performance',
+    'Release',
+    'Research',
+    'Security',
+    'Technical Debt',
+    'Testing',
+    'Urgent',
+    'UX/UI',
+    'Account Management',
+    'Accounts Payable',
+    'Accounts Receivable',
+    'Acquisition',
+    'Agile Delivery',
+    'Annual Planning',
+    'Audit',
+    'Automation',
+    'Benefits',
+    'Budget',
+    'Business Continuity',
+    'Business Intelligence',
+    'Business Process',
+    'Business Requirements',
+    'Change Management',
+    'Client Relations',
+    'Cloud Migration',
+    'Compliance',
+    'Contract Management',
+    'Corporate Communications',
+    'Corporate Governance',
+    'Cost Optimization',
+    'Cross-functional',
+    'Customer Experience',
+    'Customer Onboarding',
+    'Customer Retention',
+    'Cybersecurity',
+    'Data Governance',
+    'Data Privacy',
+    'Data Quality',
+    'Data Strategy',
+    'Decision Log',
+    'Demand Generation',
+    'Digital Transformation',
+    'Due Diligence',
+    'Employee Engagement',
+    'Employee Onboarding',
+    'Employee Relations',
+    'Enterprise Architecture',
+    'Escalation',
+    'ESG',
+    'Ethics',
+    'Executive Review',
+    'Facilities',
+    'Forecasting',
+    'Governance',
+    'Hiring',
+    'Incident Management',
+    'Internal Communications',
+    'Inventory',
+    'Investor Relations',
+    'IT Operations',
+    'KPI Tracking',
+    'Knowledge Management',
+    'Leadership',
+    'Learning & Development',
+    'Market Analysis',
+    'Market Research',
+    'Marketing Operations',
+    'Mergers & Acquisitions',
+    'Monthly Reporting',
+    'Negotiation',
+    'Office Management',
+    'OKRs',
+    'Organizational Design',
+    'Partner Management',
+    'Payroll',
+    'Policy',
+    'Portfolio Management',
+    'Pricing',
+    'Process Improvement',
+    'Procurement',
+    'Product Launch',
+    'Program Management',
+    'Regulatory',
+    'Relationship Management',
+    'Risk Assessment',
+    'Roadmap',
+    'Sales Enablement',
+    'Sales Operations',
+    'Service Delivery',
+    'SLA',
+    'Stakeholder Alignment',
+    'Strategic Partnerships',
+    'Strategic Planning',
+    'Succession Planning',
+    'Supply Chain',
+    'Sustainability',
+    'Talent Acquisition',
+    'Tax',
+    'Team Development',
+    'Vendor Management',
+    'Workforce Planning',
+    'Year-end Planning',
+    'Business Case',
+    'Capital Planning',
+    'Channel Strategy',
+    'Competitive Analysis',
+    'Corporate Strategy',
+    'Financial Planning'
+]);
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const maxTaskAttachmentBytes = 100 * 1024 * 1024;
+const attachmentDataUrlPattern = /^data:[^;,]+(?:;codecs=[^;,]+)?;base64,([a-zA-Z0-9+/=]*)$/i;
+const validTaskAttachments = attachments => {
+    if (!Array.isArray(attachments) || attachments.length > 10) return false;
+    let totalBytes = 0;
+    for (const item of attachments) {
+        if (!item || typeof item.fileName !== 'string' || !item.fileName.trim() ||
+            item.fileName.length > 255 || typeof item.mediaType !== 'string' ||
+            item.mediaType.length > 128 || typeof item.data !== 'string') return false;
+        const encoded = attachmentDataUrlPattern.exec(item.data)?.[1];
+        if (!encoded) return false;
+        const bytes = Buffer.from(encoded, 'base64').length;
+        if (!Number.isSafeInteger(item.size) || item.size !== bytes) return false;
+        totalBytes += bytes;
+        if (totalBytes > maxTaskAttachmentBytes) return false;
+    }
+    return true;
+};
+const withTransaction = async callback => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const result = await callback(client);
+        await client.query('COMMIT');
+        return result;
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+};
+const isValidDate = value => {
+    if (!value) return true;
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const [year, month, day] = value.split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return date.getUTCFullYear() === year &&
+        date.getUTCMonth() === month - 1 &&
+        date.getUTCDate() === day;
+};
+
+const toProjectDateKey = value => {
+    if (value instanceof Date && Number.isFinite(value.getTime())) {
+        return [
+            value.getFullYear(),
+            String(value.getMonth() + 1).padStart(2, '0'),
+            String(value.getDate()).padStart(2, '0')
+        ].join('-');
+    }
+
+    return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+        ? value
+        : null;
+};
+
+const normalizeTaskInput = body => {
+    const title = typeof body?.title === 'string' ? body.title.trim() : '';
+    const description = typeof body?.description === 'string' ? body.description.trim() : '';
+    const category = body?.category === undefined
+        ? 'Product'
+        : typeof body.category === 'string'
+            ? body.category.trim()
+            : '';
+    const tags = body?.tags === undefined ? [] : body.tags;
+    const status = typeof body?.status === 'string' ? body.status.trim() : 'To do';
+    const priority = typeof body?.priority === 'string'
+        ? body.priority.trim().toLowerCase()
+        : 'medium';
+    const startDate = body?.startDate || null;
+    const dueDate = body?.dueDate || null;
+    const chatMessageId = body?.chatMessageId || null;
+    const descriptionAttachments = body?.descriptionAttachments ?? [];
+
+    if (!title || title.length > 255) {
+        return { error: 'Task title is required and cannot exceed 255 characters.' };
+    }
+    if (description.length > 10_000) {
+        return { error: 'Task description cannot exceed 10,000 characters.' };
+    }
+    if (!category || category.length > 100) {
+        return { error: 'Choose a valid task category.' };
+    }
+    if (
+        !Array.isArray(tags) ||
+        tags.length > allowedTaskTags.size ||
+        tags.some(tag => typeof tag !== 'string' || !allowedTaskTags.has(tag)) ||
+        new Set(tags).size !== tags.length
+    ) {
+        return { error: 'Choose valid, unique task tags.' };
+    }
+    if (!allowedStatuses.has(status)) {
+        return { error: 'Choose a valid task status.' };
+    }
+    if (!allowedPriorities.has(priority)) {
+        return { error: 'Choose a valid task priority.' };
+    }
+    if (chatMessageId !== null && !uuidPattern.test(chatMessageId)) {
+        return { error: 'The discussion message reference is invalid.' };
+    }
+    if (!validTaskAttachments(descriptionAttachments)) {
+        return { error: 'Task media must be valid attachments totaling 100 MB or less.' };
+    }
+    if (!isValidDate(startDate) || !isValidDate(dueDate)) {
+        return { error: 'Task dates must use YYYY-MM-DD format.' };
+    }
+    if (startDate && dueDate && startDate > dueDate) {
+        return { error: 'Task due date must be on or after its start date.' };
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    if ([startDate, dueDate].some(date => date && date < today)) {
+        return { error: 'Task start and due dates cannot be in the past.' };
+    }
+
+    return {
+        value: {
+            title,
+            description,
+            category,
+            tags,
+            tagsProvided: body?.tags !== undefined,
+            status,
+            priority,
+            startDate,
+            dueDate,
+            chatMessageId,
+            descriptionAttachments
+        }
+    };
+};
+
+const validateChatMessageLink = async (projectId, messageId, firebaseUid) => {
+    if (!messageId) return null;
+    const result = await query(
+        `SELECT 1
+         FROM messages msg
+         JOIN message_conversations conversation
+           ON conversation.conversation_id = msg.conversation_id
+         WHERE msg.message_id = $1::uuid
+           AND conversation.project_id = $2
+           AND EXISTS (
+               SELECT 1 FROM message_conversation_members member
+               WHERE member.conversation_id = conversation.conversation_id
+                 AND member.firebase_uid = $3
+           )
+                     AND NOT EXISTS (
+                             SELECT 1 FROM message_conversation_user_state state
+                             WHERE state.conversation_id = conversation.conversation_id
+                                 AND state.firebase_uid = $3
+                                 AND state.hidden_at IS NOT NULL
+                     )
+         LIMIT 1`,
+        [messageId, projectId, firebaseUid]
+    );
+    return result.rowCount
+        ? null
+        : 'The linked message must be in an accessible conversation for this project.';
+};
+
+const markDependencyWarnings = async (taskId, reason, actorUid, taskTitle) => {
+    const updated = await query(
+        `UPDATE task_dependencies
+         SET warning_reason = CASE
+             WHEN $2 = 'blocked_and_due_date_postponed' THEN $2
+             WHEN warning_reason = 'blocked_and_due_date_postponed' THEN warning_reason
+             WHEN $2 = 'blocked' AND warning_reason = 'due_date_postponed'
+                 THEN 'blocked_and_due_date_postponed'
+             WHEN $2 = 'due_date_postponed' AND warning_reason = 'blocked'
+                 THEN 'blocked_and_due_date_postponed'
+             ELSE $2
+         END
+         WHERE predecessor_task_id = $1::uuid
+                     AND (
+                           $2 IN ('blocked', 'blocked_and_due_date_postponed')
+                             OR warning_reason IS NULL
+                             OR ($2 = 'due_date_postponed' AND warning_reason = 'blocked')
+                     )
+         RETURNING dependent_task_id`,
+        [taskId, reason]
+    );
+    if (!updated.rowCount) return;
+    const dependentIds = [...new Set(updated.rows.map(row => row.dependent_task_id))];
+    const dependents = await query(
+        `SELECT dependent.task_id, dependent.project_id,
+                project.creator_firebase_uid, project.sprints
+         FROM project_tasks dependent
+         JOIN projects project ON project.project_id = dependent.project_id
+         WHERE dependent.task_id = ANY($1::uuid[])`,
+        [dependentIds]
+    );
+    const detail = reason === 'blocked'
+        ? `A predecessor task for "${taskTitle}" is now blocked.`
+        : reason === 'blocked_and_due_date_postponed'
+            ? `A predecessor task for "${taskTitle}" is blocked and has a later due date.`
+            : `A predecessor task for "${taskTitle}" has a later due date.`;
+    const notifications = new Set();
+    for (const dependent of dependents.rows) {
+        const recipients = new Set([
+            dependent.creator_firebase_uid,
+            ...projectSprintMemberUids(dependent)
+        ]);
+        for (const recipientUid of recipients) {
+            if (!recipientUid || recipientUid === actorUid) continue;
+            const key = `${recipientUid}:${dependent.task_id}`;
+            if (notifications.has(key)) continue;
+            notifications.add(key);
+            await query(
+                `INSERT INTO notifications (
+                     recipient_firebase_uid, project_id, related_task_id,
+                     type, title, detail, avatar, tone_class
+                 )
+                 VALUES ($1, $2, $3, 'task_dependency_warning',
+                         'Task dependency needs attention', $4, '!', 'orange-bg')`,
+                [recipientUid, dependent.project_id, dependent.task_id, detail]
+            );
+        }
+    }
+};
+
+const getProjectAndCheckAccess = async (projectId, firebaseUid, ownerOnly = false) => {
+    const result = await query(
+        `
+            SELECT project_id, name, creator_firebase_uid, creator_initials,
+                   start_date::text AS start_date,
+                   due_date::text AS due_date,
+                   sprints
+            FROM projects p
+            WHERE p.project_id = $1
+              AND (
+                    p.creator_firebase_uid = $2
+                    OR (
+                        NOT $3
+                        AND EXISTS (
+                            SELECT 1
+                            FROM project_invitations access_invitation
+                            WHERE access_invitation.project_id = p.project_id
+                              AND access_invitation.invited_firebase_uid = $2
+                              AND access_invitation.status = 'accepted'
+                        )
+                    )
+              )
+            LIMIT 1
+        `,
+        [projectId, firebaseUid, ownerOnly]
+    );
+    return result.rows[0] || null;
+};
+
+const validateTaskProjectTimeline = (project, task) => {
+    const projectStartDate = toProjectDateKey(project.start_date);
+    const projectDueDate = toProjectDateKey(project.due_date);
+    const taskStartDate = task.startDate;
+    const taskDueDate = task.dueDate;
+
+    if (
+        (taskStartDate && projectStartDate && taskStartDate < projectStartDate) ||
+        (taskDueDate && projectDueDate && taskDueDate > projectDueDate) ||
+        (taskStartDate && projectDueDate && taskStartDate > projectDueDate) ||
+        (taskDueDate && projectStartDate && taskDueDate < projectStartDate)
+    ) {
+        return `Task dates must fall within the project timeline (${projectStartDate || 'any start date'} to ${projectDueDate || 'any due date'}).`;
+    }
+
+    return null;
+};
+
+const getProjectTasks = async (req, res) => {
+    try {
+        const project = await getProjectAndCheckAccess(req.params.projectId, req.firebaseUid);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                code: 'PROJECT_NOT_FOUND',
+                message: 'Project not found.'
+            });
+        }
+
+        const result = await query(
+            `
+                SELECT
+                    t.task_id,
+                    t.project_id,
+                    p.name AS project_name,
+                    t.title,
+                    t.description,
+                    t.category,
+                    t.tags,
+                    t.task_submission_status,
+                    t.task_submission_note,
+                    t.task_submission_links,
+                    t.task_submitted_at,
+                    t.task_submitted_by_firebase_uid,
+                    t.task_review_comment,
+                    t.task_reviewed_by_firebase_uid,
+                    t.task_reviewed_at,
+                    COALESCE((
+                        SELECT jsonb_agg(
+                            (attachment.value - 'data') ||
+                                jsonb_build_object('attachment_index', attachment.ordinality - 1)
+                            ORDER BY attachment.ordinality
+                        )
+                        FROM jsonb_array_elements(t.task_submission_attachments)
+                            WITH ORDINALITY AS attachment(value, ordinality)
+                    ), '[]'::jsonb) AS task_submission_attachments,
+                    t.chat_message_id::text AS chat_message_id,
+                    context_message.conversation_id::text AS chat_conversation_id,
+                    COALESCE((
+                        SELECT jsonb_agg(
+                            (attachment.value - 'data') ||
+                                jsonb_build_object('attachment_index', attachment.ordinality - 1)
+                            ORDER BY attachment.ordinality
+                        )
+                        FROM jsonb_array_elements(t.description_attachments)
+                            WITH ORDINALITY AS attachment(value, ordinality)
+                    ), '[]'::jsonb) AS description_attachments,
+                    t.status,
+                    t.priority,
+                    COALESCE(dependencies.items, '[]'::jsonb) AS dependencies,
+                    COALESCE(dependencies.has_warning, FALSE) AS has_dependency_warning,
+                    t.start_date,
+                    t.due_date,
+                    t.created_by_firebase_uid,
+                    t.created_at,
+                    t.updated_at
+                FROM project_tasks t
+                JOIN projects p ON p.project_id = t.project_id
+                LEFT JOIN messages context_message
+                  ON context_message.message_id = t.chat_message_id
+                 AND EXISTS (
+                     SELECT 1
+                     FROM message_conversation_members member
+                     WHERE member.conversation_id = context_message.conversation_id
+                       AND member.firebase_uid = $2
+                 )
+                 AND NOT EXISTS (
+                     SELECT 1
+                     FROM message_conversation_user_state state
+                     WHERE state.conversation_id = context_message.conversation_id
+                       AND state.firebase_uid = $2
+                       AND state.hidden_at IS NOT NULL
+                 )
+                LEFT JOIN LATERAL (
+                    SELECT
+                        jsonb_agg(jsonb_build_object(
+                            'task_id', predecessor.task_id,
+                            'project_id', predecessor.project_id,
+                            'title', predecessor.title,
+                            'status', predecessor.status,
+                            'warning_reason', dependency.warning_reason
+                        ) ORDER BY predecessor.title) AS items,
+                        bool_or(dependency.warning_reason IS NOT NULL) AS has_warning
+                    FROM task_dependencies dependency
+                    JOIN project_tasks predecessor
+                      ON predecessor.task_id = dependency.predecessor_task_id
+                    WHERE dependency.dependent_task_id = t.task_id
+                      AND (
+                          EXISTS (
+                              SELECT 1 FROM projects own
+                              WHERE own.project_id = predecessor.project_id
+                                AND own.creator_firebase_uid = $2
+                          )
+                          OR EXISTS (
+                              SELECT 1 FROM project_invitations access
+                              WHERE access.project_id = predecessor.project_id
+                                AND access.invited_firebase_uid = $2
+                                AND access.status = 'accepted'
+                          )
+                      )
+                ) dependencies ON TRUE
+                WHERE t.project_id = $1
+                  AND (
+                    $3::boolean = FALSE
+                    OR p.creator_firebase_uid = $2
+                    OR EXISTS (
+                        SELECT 1
+                        FROM jsonb_array_elements(
+                            CASE
+                                WHEN jsonb_typeof(p.sprints) = 'array' THEN p.sprints
+                                ELSE '[]'::jsonb
+                            END
+                        ) AS sprint(value)
+                        WHERE (
+                            CASE
+                                WHEN jsonb_typeof(sprint.value->'memberFirebaseUids') = 'array'
+                                    THEN sprint.value->'memberFirebaseUids'
+                                WHEN jsonb_typeof(sprint.value->'member_firebase_uids') = 'array'
+                                    THEN sprint.value->'member_firebase_uids'
+                                ELSE jsonb_build_array(COALESCE(
+                                    NULLIF(sprint.value->>'assigneeFirebaseUid', ''),
+                                    NULLIF(sprint.value->>'assignee_firebase_uid', '')
+                                ))
+                            END
+                          ) ? $2
+                    )
+                  )
+                ORDER BY t.created_at, t.title
+            `,
+            [project.project_id, req.firebaseUid, req.query.assignedToMe === 'true']
+        );
+        return res.status(200).json({
+            success: true,
+            data: { tasks: result.rows }
+        });
+    } catch (error) {
+        console.error('Get project tasks error:', error);
+        return res.status(500).json({
+            success: false,
+            code: 'PROJECT_TASKS_FETCH_FAILED',
+            message: 'Project tasks could not be retrieved.'
+        });
+    }
+};
+
+const getProjectTaskDetails = async (req, res) => {
+    if (!uuidPattern.test(req.params.taskId || '')) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK_ID',
+            message: 'Task ID is invalid.'
+        });
+    }
+    try {
+        const project = await getProjectAndCheckAccess(req.params.projectId, req.firebaseUid);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                code: 'PROJECT_NOT_FOUND',
+                message: 'Project not found.'
+            });
+        }
+        const result = await query(
+            `SELECT task.task_id, task.project_id, task.title, task.description,
+                    task.category, task.tags,
+                    task.task_submission_status, task.task_submission_note,
+                    task.task_submission_links, task.task_submitted_at,
+                    task.task_submitted_by_firebase_uid,
+                    task.task_review_comment, task.task_reviewed_by_firebase_uid,
+                    task.task_reviewed_at,
+                    COALESCE((
+                        SELECT jsonb_agg(attachment.value - 'data' ORDER BY attachment.ordinality)
+                        FROM jsonb_array_elements(task.task_submission_attachments)
+                            WITH ORDINALITY AS attachment(value, ordinality)
+                    ), '[]'::jsonb) AS task_submission_attachments,
+                    task.status, task.priority, task.start_date, task.due_date,
+                    task.chat_message_id::text AS chat_message_id,
+                    message.conversation_id::text AS chat_conversation_id,
+                    CASE WHEN $4::boolean THEN COALESCE((
+                        SELECT jsonb_agg(
+                            (attachment.value - 'data') ||
+                                jsonb_build_object('attachment_index', attachment.ordinality - 1)
+                            ORDER BY attachment.ordinality
+                        )
+                        FROM jsonb_array_elements(task.description_attachments)
+                            WITH ORDINALITY AS attachment(value, ordinality)
+                    ), '[]'::jsonb) ELSE task.description_attachments END AS description_attachments,
+                    task.created_at, task.updated_at
+             FROM project_tasks task
+                         JOIN projects project ON project.project_id = task.project_id
+                         LEFT JOIN messages message
+                             ON message.message_id = task.chat_message_id
+                            AND EXISTS (
+                                    SELECT 1 FROM message_conversation_members member
+                                    WHERE member.conversation_id = message.conversation_id
+                                        AND member.firebase_uid = $3
+                            )
+                            AND NOT EXISTS (
+                                    SELECT 1 FROM message_conversation_user_state state
+                                    WHERE state.conversation_id = message.conversation_id
+                                        AND state.firebase_uid = $3
+                                        AND state.hidden_at IS NOT NULL
+                            )
+             WHERE task.project_id = $1 AND task.task_id = $2::uuid
+             LIMIT 1`,
+                        [
+                            project.project_id,
+                            req.params.taskId,
+                            req.firebaseUid,
+                            req.query.metadataOnly === 'true'
+                        ]
+        );
+        if (!result.rowCount) {
+            return res.status(404).json({
+                success: false,
+                code: 'TASK_NOT_FOUND',
+                message: 'Task not found.'
+            });
+        }
+        return res.status(200).json({ success: true, data: { task: result.rows[0] } });
+    } catch (error) {
+        console.error('Get project task details error:', error);
+        return res.status(500).json({
+            success: false,
+            code: 'PROJECT_TASK_DETAILS_FETCH_FAILED',
+            message: 'Task details could not be retrieved.'
+        });
+    }
+};
+
+const getProjectTaskAttachment = async (req, res) => {
+    if (!uuidPattern.test(req.params.taskId || '')) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK_ID',
+            message: 'Task ID is invalid.'
+        });
+    }
+    if (!/^\d+$/.test(req.params.attachmentIndex || '') ||
+        !Number.isSafeInteger(Number(req.params.attachmentIndex))) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_ATTACHMENT_INDEX',
+            message: 'Task attachment index is invalid.'
+        });
+    }
+
+    try {
+        const project = await getProjectAndCheckAccess(req.params.projectId, req.firebaseUid);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                code: 'PROJECT_NOT_FOUND',
+                message: 'Project not found.'
+            });
+        }
+
+        const result = await query(
+            `SELECT description_attachments -> $3::int AS attachment
+             FROM project_tasks
+             WHERE project_id = $1 AND task_id = $2::uuid
+             LIMIT 1`,
+            [project.project_id, req.params.taskId, Number(req.params.attachmentIndex)]
+        );
+        if (!result.rowCount || !result.rows[0].attachment) {
+            return res.status(404).json({
+                success: false,
+                code: 'TASK_ATTACHMENT_NOT_FOUND',
+                message: 'Task attachment not found.'
+            });
+        }
+        return res.status(200).json({
+            success: true,
+            data: { attachment: result.rows[0].attachment }
+        });
+    } catch (error) {
+        console.error('Get project task attachment error:', error);
+        return res.status(500).json({
+            success: false,
+            code: 'PROJECT_TASK_ATTACHMENT_FETCH_FAILED',
+            message: 'The task attachment could not be retrieved.'
+        });
+    }
+};
+
+const getProjectTaskSubmissionAttachment = async (req, res) => {
+    if (!uuidPattern.test(req.params.taskId || '')) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK_ID',
+            message: 'Task ID is invalid.'
+        });
+    }
+    if (!/^\d+$/.test(req.params.attachmentIndex || '') ||
+        !Number.isSafeInteger(Number(req.params.attachmentIndex))) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_ATTACHMENT_INDEX',
+            message: 'Submission attachment index is invalid.'
+        });
+    }
+
+    try {
+        const project = await getProjectAndCheckAccess(req.params.projectId, req.firebaseUid);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                code: 'PROJECT_NOT_FOUND',
+                message: 'Project not found.'
+            });
+        }
+        const result = await query(
+            `SELECT task_submission_attachments -> $3::int AS attachment
+             FROM project_tasks
+             WHERE project_id = $1 AND task_id = $2::uuid
+             LIMIT 1`,
+            [project.project_id, req.params.taskId, Number(req.params.attachmentIndex)]
+        );
+        if (!result.rowCount || !result.rows[0].attachment) {
+            return res.status(404).json({
+                success: false,
+                code: 'TASK_SUBMISSION_ATTACHMENT_NOT_FOUND',
+                message: 'Task submission attachment not found.'
+            });
+        }
+        return res.status(200).json({
+            success: true,
+            data: { attachment: result.rows[0].attachment }
+        });
+    } catch (error) {
+        console.error('Get task submission attachment error:', error);
+        return res.status(500).json({
+            success: false,
+            code: 'TASK_SUBMISSION_ATTACHMENT_FETCH_FAILED',
+            message: 'The task submission attachment could not be retrieved.'
+        });
+    }
+};
+
+const submitProjectTaskForReview = async (req, res) => {
+    let client;
+    try {
+        const { projectId, taskId } = req.params;
+        if (!uuidPattern.test(taskId || '')) {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_TASK_ID',
+                message: 'Task ID is invalid.'
+            });
+        }
+
+        const project = await getProjectAndCheckAccess(projectId, req.firebaseUid);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                code: 'PROJECT_NOT_FOUND',
+                message: 'Project not found.'
+            });
+        }
+        const submissionNote = typeof req.body?.submissionNote === 'string'
+            ? req.body.submissionNote.trim()
+            : '';
+        const { attachments, error: attachmentError } =
+            normalizeTaskSubmissionAttachments(req.body?.submissionAttachments);
+        const { links, error: linksError } =
+            normalizeTaskSubmissionLinks(req.body?.submissionLinks);
+        if (attachmentError || linksError) {
+            return res.status(400).json({
+                success: false,
+                code: 'TASK_SUBMISSION_INVALID',
+                message: attachmentError || linksError
+            });
+        }
+        if (submissionNote.length > 5000 ||
+            (!submissionNote && !attachments.length && !links.length)) {
+            return res.status(400).json({
+                success: false,
+                code: 'TASK_SUBMISSION_CONTENT_REQUIRED',
+                message: submissionNote.length > 5000
+                    ? 'Submission notes cannot exceed 5,000 characters.'
+                    : 'Add submission notes, attach a file or voice note, or include a link.'
+            });
+        }
+
+        client = await pool.connect();
+        await client.query('BEGIN');
+        const taskResult = await client.query(
+            `SELECT task.task_id, task.title, task.status,
+                    task.task_submission_status,
+                    project.name AS project_name,
+                    project.creator_firebase_uid AS project_creator_firebase_uid,
+                    project.creator_initials
+             FROM project_tasks task
+             JOIN projects project ON project.project_id = task.project_id
+             WHERE task.project_id = $1 AND task.task_id = $2::uuid
+             FOR UPDATE OF task`,
+            [project.project_id, taskId]
+        );
+        if (!taskResult.rowCount) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({
+                success: false,
+                code: 'TASK_NOT_FOUND',
+                message: 'Task not found.'
+            });
+        }
+
+        const task = taskResult.rows[0];
+        if (
+            project.creator_firebase_uid !== req.firebaseUid &&
+            !projectSprintMemberUids(project).includes(req.firebaseUid)
+        ) {
+            await client.query('ROLLBACK');
+            return res.status(403).json({
+                success: false,
+                code: 'TASK_SUBMISSION_FORBIDDEN',
+                message: 'Only the project owner or a project sprint member can submit this task for review.'
+            });
+        }
+        if (task.status !== 'In progress') {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+                success: false,
+                code: 'TASK_NOT_STARTED',
+                message: 'Start the task before submitting it for review.'
+            });
+        }
+        if (['Pending Review', 'Completed'].includes(task.task_submission_status)) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+                success: false,
+                code: 'TASK_NOT_SUBMITTABLE',
+                message: task.task_submission_status === 'Completed'
+                    ? 'This task submission has already been accepted.'
+                    : 'This task is already awaiting review.'
+            });
+        }
+
+        const submittedAt = new Date().toISOString();
+        const saved = await client.query(
+            `UPDATE project_tasks
+             SET task_submission_status = 'Pending Review',
+                 task_submission_note = $1,
+                 task_submission_attachments = $2::jsonb,
+                 task_submission_links = $3::jsonb,
+                 task_submitted_by_firebase_uid = $4,
+                 task_submitted_at = $5::timestamptz,
+                 updated_at = NOW()
+             WHERE project_id = $6 AND task_id = $7::uuid
+             RETURNING task_id, task_submission_status,
+                       task_submission_note, task_submission_links,
+                       task_submitted_at`,
+            [
+                submissionNote,
+                JSON.stringify(attachments),
+                JSON.stringify(links),
+                req.firebaseUid,
+                submittedAt,
+                project.project_id,
+                taskId
+            ]
+        );
+        if (!saved.rowCount) throw new Error('Task submission did not persist.');
+        await client.query('COMMIT');
+
+        let notificationWarning = null;
+        if (task.project_creator_firebase_uid !== req.firebaseUid) {
+            try {
+                await query(
+                    `INSERT INTO notifications (
+                        recipient_firebase_uid, project_id, related_task_id,
+                        type, title, detail, avatar, tone_class
+                     )
+                     VALUES ($1, $2, $3, 'task_submitted_for_review', $4, $5, $6, 'orange-bg')`,
+                    [
+                        task.project_creator_firebase_uid,
+                        project.project_id,
+                        taskId,
+                        'Project task ready for review',
+                        `${req.firebaseUser?.name || req.firebaseUser?.displayName || req.firebaseEmail || 'A project member'} submitted "${task.title}" in "${task.project_name}" for review.`,
+                        task.creator_initials || '•'
+                    ]
+                );
+            } catch (notificationError) {
+                console.error('Task submission saved, but its notification could not be created:', notificationError);
+                notificationWarning = 'The submission was saved, but the project owner could not be notified.';
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Task submitted for review.',
+            ...(notificationWarning ? { notificationWarning } : {}),
+            data: { task: saved.rows[0] }
+        });
+    } catch (error) {
+        await client?.query('ROLLBACK').catch(rollbackError => {
+            console.error('Task submission rollback error:', rollbackError);
+        });
+        console.error('Submit project task for review error:', error);
+        return res.status(500).json({
+            success: false,
+            code: 'TASK_SUBMISSION_FAILED',
+            message: 'The task could not be submitted for review.'
+        });
+    } finally {
+        client?.release();
+    }
+};
+
+const reviewProjectTaskSubmission = async (req, res) => {
+    let client;
+    try {
+        const { projectId, taskId } = req.params;
+        if (!uuidPattern.test(taskId || '')) {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_TASK_ID',
+                message: 'Task ID is invalid.'
+            });
+        }
+        const project = await getProjectAndCheckAccess(projectId, req.firebaseUid);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                code: 'PROJECT_NOT_FOUND',
+                message: 'Project not found.'
+            });
+        }
+        if (project.creator_firebase_uid !== req.firebaseUid) {
+            return res.status(403).json({
+                success: false,
+                code: 'TASK_REVIEW_FORBIDDEN',
+                message: 'Only the project owner can review this task submission.'
+            });
+        }
+
+        const decision = typeof req.body?.decision === 'string' ? req.body.decision.trim() : '';
+        const comment = typeof req.body?.comment === 'string' ? req.body.comment.trim() : '';
+        if (!['accept', 'request_changes'].includes(decision) ||
+            comment.length > 5000 ||
+            (decision === 'request_changes' && !comment)) {
+            return res.status(400).json({
+                success: false,
+                code: 'TASK_REVIEW_INVALID',
+                message: comment.length > 5000
+                    ? 'Review comments cannot exceed 5,000 characters.'
+                    : decision === 'request_changes' && !comment
+                        ? 'Add feedback explaining the requested changes.'
+                        : 'Choose whether to accept the submission or request changes.'
+            });
+        }
+
+        client = await pool.connect();
+        await client.query('BEGIN');
+        const taskResult = await client.query(
+            `SELECT task.task_id, task.title, task.status,
+                    task.task_submission_status,
+                    project.name AS project_name
+             FROM project_tasks task
+             JOIN projects project ON project.project_id = task.project_id
+             WHERE task.project_id = $1 AND task.task_id = $2::uuid
+             FOR UPDATE OF task`,
+            [project.project_id, taskId]
+        );
+        if (!taskResult.rowCount) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({
+                success: false,
+                code: 'TASK_NOT_FOUND',
+                message: 'Task not found.'
+            });
+        }
+        const task = taskResult.rows[0];
+        if (task.task_submission_status !== 'Pending Review') {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+                success: false,
+                code: 'TASK_NOT_AWAITING_REVIEW',
+                message: 'This task submission is not awaiting review.'
+            });
+        }
+
+        const reviewedAt = new Date().toISOString();
+        const updated = await client.query(
+            `UPDATE project_tasks
+             SET task_submission_status = $1,
+                 task_review_comment = $2,
+                 task_reviewed_by_firebase_uid = $3,
+                 task_reviewed_at = $4::timestamptz,
+                 status = CASE WHEN $5::boolean THEN 'Done' ELSE status END,
+                 updated_at = NOW()
+             WHERE project_id = $6 AND task_id = $7::uuid
+             RETURNING task_id, status, task_submission_status,
+                       task_review_comment, task_reviewed_by_firebase_uid,
+                       task_reviewed_at`,
+            [
+                decision === 'accept' ? 'Completed' : 'Changes Requested',
+                comment,
+                req.firebaseUid,
+                reviewedAt,
+                decision === 'accept',
+                project.project_id,
+                taskId
+            ]
+        );
+        await client.query('COMMIT');
+
+        let notificationWarning = null;
+        const reviewRecipients = projectSprintMemberUids(project)
+            .filter(memberUid => memberUid !== req.firebaseUid);
+        for (const recipientUid of reviewRecipients) {
+            try {
+                await query(
+                    `INSERT INTO notifications (
+                        recipient_firebase_uid, project_id, related_task_id,
+                        type, title, detail, avatar, tone_class
+                     )
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                    [
+                        recipientUid,
+                        project.project_id,
+                        taskId,
+                        decision === 'accept' ? 'task_submission_accepted' : 'task_changes_requested',
+                        decision === 'accept' ? 'Task submission accepted' : 'Task changes requested',
+                        decision === 'accept'
+                            ? `Your submission for "${task.title}" was accepted.`
+                            : `Changes were requested for your submission for "${task.title}".`,
+                        project.creator_initials || '•',
+                        decision === 'accept' ? 'green-bg' : 'orange-bg'
+                    ]
+                );
+            } catch (notificationError) {
+                console.error(
+                    `Task review saved, but member ${recipientUid} could not be notified:`,
+                    notificationError
+                );
+                notificationWarning = 'The review was saved, but one or more project members could not be notified.';
+            }
+        }
+        return res.status(200).json({
+            success: true,
+            message: decision === 'accept'
+                ? 'Task submission accepted.'
+                : 'Changes requested for the task submission.',
+            ...(notificationWarning ? { notificationWarning } : {}),
+            data: { task: updated.rows[0] }
+        });
+    } catch (error) {
+        await client?.query('ROLLBACK').catch(rollbackError => {
+            console.error('Task review rollback error:', rollbackError);
+        });
+        console.error('Review project task submission error:', error);
+        return res.status(500).json({
+            success: false,
+            code: 'TASK_REVIEW_FAILED',
+            message: 'The task submission could not be reviewed.'
+        });
+    } finally {
+        client?.release();
+    }
+};
+
+const getProjectTaskComments = async (req, res) => {
+    if (!uuidPattern.test(req.params.taskId)) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK_ID',
+            message: 'Task ID is invalid.'
+        });
+    }
+
+    try {
+        const project = await getProjectAndCheckAccess(req.params.projectId, req.firebaseUid);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                code: 'PROJECT_NOT_FOUND',
+                message: 'Project not found.'
+            });
+        }
+
+        const task = await query(
+            'SELECT 1 FROM project_tasks WHERE project_id = $1 AND task_id = $2::uuid LIMIT 1',
+            [project.project_id, req.params.taskId]
+        );
+        if (!task.rowCount) {
+            return res.status(404).json({
+                success: false,
+                code: 'TASK_NOT_FOUND',
+                message: 'Task not found.'
+            });
+        }
+
+        const result = await query(
+            `
+                SELECT
+                    task_comment.comment_id,
+                    task_comment.author_firebase_uid,
+                    task_comment.author_name,
+                    task_comment.author_email,
+                    COALESCE(author_profile.profile_image, '') AS author_profile_image,
+                    task_comment.body,
+                    task_comment.attachments,
+                    task_comment.created_at
+                FROM project_task_comments task_comment
+                LEFT JOIN user_profiles author_profile
+                  ON author_profile.firebase_uid = task_comment.author_firebase_uid
+                WHERE task_comment.task_id = $1::uuid
+                ORDER BY task_comment.created_at, task_comment.comment_id
+            `,
+            [req.params.taskId]
+        );
+        return res.status(200).json({
+            success: true,
+            data: { comments: result.rows }
+        });
+    } catch (error) {
+        console.error('Get project task comments error:', error);
+        return res.status(500).json({
+            success: false,
+            code: 'PROJECT_TASK_COMMENTS_FETCH_FAILED',
+            message: 'Task comments could not be retrieved.'
+        });
+    }
+};
+
+const createProjectTaskComment = async (req, res) => {
+    if (!uuidPattern.test(req.params.taskId)) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK_ID',
+            message: 'Task ID is invalid.'
+        });
+    }
+    const body = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    const attachments = req.body?.attachments ?? [];
+    if ((!body && (!Array.isArray(attachments) || !attachments.length)) ||
+        body.length > 5000 || !validTaskAttachments(attachments)) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK_COMMENT',
+            message: 'Add comment text or valid media attachments totaling 100 MB or less.'
+        });
+    }
+
+    try {
+        const project = await getProjectAndCheckAccess(req.params.projectId, req.firebaseUid);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                code: 'PROJECT_NOT_FOUND',
+                message: 'Project not found.'
+            });
+        }
+
+        const authorName =
+            req.firebaseUser?.name ||
+            req.firebaseUser?.displayName ||
+            req.firebaseEmail ||
+            'Project member';
+        const result = await query(
+            `
+                INSERT INTO project_task_comments (
+                    task_id,
+                    author_firebase_uid,
+                    author_name,
+                    author_email,
+                    body,
+                    attachments
+                )
+                SELECT
+                    task_id,
+                    $3,
+                    $4,
+                    $5,
+                    $6,
+                    $7::jsonb
+                FROM project_tasks
+                WHERE project_id = $1
+                  AND task_id = $2::uuid
+                RETURNING
+                    comment_id,
+                    author_firebase_uid,
+                    author_name,
+                    author_email,
+                    body,
+                    attachments,
+                    created_at
+            `,
+            [
+                project.project_id,
+                req.params.taskId,
+                req.firebaseUid,
+                authorName,
+                req.firebaseEmail,
+                body,
+                JSON.stringify(attachments)
+            ]
+        );
+        if (!result.rowCount) {
+            return res.status(404).json({
+                success: false,
+                code: 'TASK_NOT_FOUND',
+                message: 'Task not found.'
+            });
+        }
+        return res.status(201).json({
+            success: true,
+            data: { comment: result.rows[0] }
+        });
+    } catch (error) {
+        console.error('Create project task comment error:', error);
+        return res.status(500).json({
+            success: false,
+            code: 'PROJECT_TASK_COMMENT_CREATE_FAILED',
+            message: 'The comment could not be posted.'
+        });
+    }
+};
+
+const createProjectTask = async (req, res) => {
+    const normalized = normalizeTaskInput(req.body);
+    if (normalized.error) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK',
+            message: normalized.error
+        });
+    }
+
+    try {
+        const project = await getProjectAndCheckAccess(req.params.projectId, req.firebaseUid);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                code: 'PROJECT_NOT_FOUND',
+                message: 'Project not found or you are not an accepted project member.'
+            });
+        }
+        if (normalized.value.status !== 'To do') {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_TASK_STATUS',
+                message: 'New project tasks must start in To do.'
+            });
+        }
+        const timelineError = validateTaskProjectTimeline(project, normalized.value);
+        if (timelineError) {
+            return res.status(400).json({
+                success: false,
+                code: 'TASK_OUTSIDE_PROJECT_TIMELINE',
+                message: timelineError
+            });
+        }
+        const messageLinkError = await validateChatMessageLink(
+            project.project_id,
+            normalized.value.chatMessageId,
+            req.firebaseUid
+        );
+        if (messageLinkError) {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_TASK_MESSAGE_LINK',
+                message: messageLinkError
+            });
+        }
+        const taskId = randomUUID();
+        const result = await query(
+            `
+                INSERT INTO project_tasks (
+                    task_id, project_id, title, description, category,
+                    status, start_date, due_date,
+                    created_by_firebase_uid, chat_message_id, description_attachments,
+                    priority, tags
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $11::jsonb, $12, $13::jsonb)
+                RETURNING task_id
+            `,
+            [
+                taskId,
+                project.project_id,
+                normalized.value.title,
+                normalized.value.description,
+                normalized.value.category,
+                normalized.value.status,
+                normalized.value.startDate,
+                normalized.value.dueDate,
+                req.firebaseUid,
+                normalized.value.chatMessageId,
+                JSON.stringify(normalized.value.descriptionAttachments),
+                normalized.value.priority,
+                JSON.stringify(normalized.value.tags)
+            ]
+        );
+
+        return res.status(201).json({
+            success: true,
+            data: { taskId: result.rows[0].task_id }
+        });
+    } catch (error) {
+        console.error('Create project task error:', error);
+        return res.status(500).json({
+            success: false,
+            code: 'PROJECT_TASK_CREATE_FAILED',
+            message: 'The project task could not be created.'
+        });
+    }
+};
+
+const updateProjectTask = async (req, res) => {
+    if (!uuidPattern.test(req.params.taskId)) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK_ID',
+            message: 'Task ID is invalid.'
+        });
+    }
+    const normalized = normalizeTaskInput(req.body);
+    if (normalized.error) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK',
+            message: normalized.error
+        });
+    }
+
+    try {
+        const project = await getProjectAndCheckAccess(req.params.projectId, req.firebaseUid, true);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                code: 'PROJECT_NOT_FOUND',
+                message: 'Project not found or you are not its creator.'
+            });
+        }
+        const timelineError = validateTaskProjectTimeline(project, normalized.value);
+        if (timelineError) {
+            return res.status(400).json({
+                success: false,
+                code: 'TASK_OUTSIDE_PROJECT_TIMELINE',
+                message: timelineError
+            });
+        }
+        const messageLinkError = await validateChatMessageLink(
+            project.project_id,
+            normalized.value.chatMessageId,
+            req.firebaseUid
+        );
+        if (messageLinkError) {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_TASK_MESSAGE_LINK',
+                message: messageLinkError
+            });
+        }
+
+        const previousTask = await query(
+            `SELECT due_date, status, title, task_submission_status FROM project_tasks
+             WHERE project_id = $1 AND task_id = $2::uuid LIMIT 1`,
+            [project.project_id, req.params.taskId]
+        );
+        if (!previousTask.rowCount) {
+            return res.status(404).json({
+                success: false,
+                code: 'TASK_NOT_FOUND',
+                message: 'Task not found.'
+            });
+        }
+        if (
+            normalized.value.status === 'Done' &&
+            previousTask.rows[0].task_submission_status !== 'Completed'
+        ) {
+            return res.status(409).json({
+                success: false,
+                code: 'TASK_SUBMISSION_NOT_ACCEPTED',
+                message: 'A task can move to Done after its submission is accepted.'
+            });
+        }
+
+        const result = await query(
+            `
+                UPDATE project_tasks
+                SET title = $1,
+                    description = $2,
+                    category = $3,
+                    status = $4,
+                    priority = $5,
+                    start_date = $6,
+                    due_date = $7,
+                    deadline_warning_sent_at = CASE
+                        WHEN due_date IS DISTINCT FROM $7::date THEN NULL
+                        ELSE deadline_warning_sent_at
+                    END,
+                    deadline_blocked_at = CASE
+                        WHEN due_date IS DISTINCT FROM $7::date THEN NULL
+                        ELSE deadline_blocked_at
+                    END,
+                    chat_message_id = $8::uuid,
+                    description_attachments = $9::jsonb,
+                    tags = CASE WHEN $10::boolean THEN $11::jsonb ELSE tags END,
+                    updated_at = NOW()
+                WHERE project_id = $12
+                  AND task_id = $13::uuid
+                  AND (
+                    $4 <> 'Done'
+                    OR project_tasks.task_submission_status = 'Completed'
+                  )
+                RETURNING task_id
+            `,
+            [
+                normalized.value.title,
+                normalized.value.description,
+                normalized.value.category,
+                normalized.value.status,
+                normalized.value.priority,
+                normalized.value.startDate,
+                normalized.value.dueDate,
+                normalized.value.chatMessageId,
+                JSON.stringify(normalized.value.descriptionAttachments),
+                normalized.value.tagsProvided,
+                JSON.stringify(normalized.value.tags),
+                project.project_id,
+                req.params.taskId
+            ]
+        );
+        if (!result.rowCount) {
+            if (normalized.value.status === 'Done') {
+                return res.status(409).json({
+                    success: false,
+                    code: 'TASK_SUBMISSION_NOT_ACCEPTED',
+                    message: 'A task can move to Done after its submission is accepted.'
+                });
+            }
+            return res.status(404).json({
+                success: false,
+                code: 'TASK_NOT_FOUND',
+                message: 'Task not found.'
+            });
+        }
+        const previousDueDate = previousTask.rows[0].due_date
+            ? new Date(previousTask.rows[0].due_date).toISOString().slice(0, 10)
+            : null;
+        const newlyBlocked = normalized.value.status === 'Blocked' &&
+            previousTask.rows[0].status !== 'Blocked';
+        const dueDatePostponed = Boolean(normalized.value.dueDate && previousDueDate &&
+            normalized.value.dueDate > previousDueDate);
+        if (!dueDatePostponed && previousDueDate &&
+            (!normalized.value.dueDate || normalized.value.dueDate <= previousDueDate)) {
+            await query(
+                `UPDATE task_dependencies
+                 SET warning_reason = CASE
+                     WHEN warning_reason = 'blocked_and_due_date_postponed' THEN 'blocked'
+                     ELSE NULL
+                 END
+                 WHERE predecessor_task_id = $1::uuid
+                   AND warning_reason IN ('due_date_postponed', 'blocked_and_due_date_postponed')`,
+                [req.params.taskId]
+            );
+        }
+        if (newlyBlocked || dueDatePostponed) {
+            await markDependencyWarnings(
+                req.params.taskId,
+                newlyBlocked && dueDatePostponed
+                    ? 'blocked_and_due_date_postponed'
+                    : newlyBlocked ? 'blocked' : 'due_date_postponed',
+                req.firebaseUid,
+                previousTask.rows[0].title
+            );
+        }
+        if (previousTask.rows[0].status === 'Blocked' && normalized.value.status !== 'Blocked') {
+            await query(
+                `UPDATE task_dependencies
+                 SET warning_reason = CASE
+                     WHEN warning_reason = 'blocked_and_due_date_postponed' THEN 'due_date_postponed'
+                     ELSE NULL
+                 END
+                 WHERE predecessor_task_id = $1::uuid
+                   AND warning_reason IN ('blocked', 'blocked_and_due_date_postponed')`,
+                [req.params.taskId]
+            );
+        }
+        return res.status(200).json({
+            success: true,
+            data: { taskId: result.rows[0].task_id }
+        });
+    } catch (error) {
+        console.error('Update project task error:', error);
+        return res.status(500).json({
+            success: false,
+            code: 'PROJECT_TASK_UPDATE_FAILED',
+            message: 'The project task could not be updated.'
+        });
+    }
+};
+
+const updateProjectTaskStatus = async (req, res) => {
+    if (!uuidPattern.test(req.params.taskId)) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK_ID',
+            message: 'Task ID is invalid.'
+        });
+    }
+    const status = typeof req.body?.status === 'string' ? req.body.status.trim() : '';
+    if (!allowedStatuses.has(status)) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK_STATUS',
+            message: 'Choose a valid task status.'
+        });
+    }
+
+    try {
+        const project = await getProjectAndCheckAccess(req.params.projectId, req.firebaseUid);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                code: 'PROJECT_NOT_FOUND',
+                message: 'Project not found.'
+            });
+        }
+
+        const existingTask = await query(
+            `
+                SELECT task_id, status, title, task_submission_status
+                FROM project_tasks
+                WHERE project_id = $1
+                  AND task_id = $2::uuid
+                LIMIT 1
+            `,
+            [project.project_id, req.params.taskId]
+        );
+        if (!existingTask.rowCount) {
+            return res.status(404).json({
+                success: false,
+                code: 'TASK_NOT_FOUND',
+                message: 'Task not found.'
+            });
+        }
+        const isProjectOwner = project.creator_firebase_uid === req.firebaseUid;
+        const isProjectSprintMember = projectSprintMemberUids(project).includes(req.firebaseUid);
+        if (!isProjectOwner && !isProjectSprintMember) {
+            return res.status(403).json({
+                success: false,
+                code: 'TASK_STATUS_UPDATE_FORBIDDEN',
+                message: 'Only the project owner or a project sprint member can move it.'
+            });
+        }
+
+        const task = existingTask.rows[0];
+        if (status === 'Done' && task.task_submission_status !== 'Completed') {
+            return res.status(409).json({
+                success: false,
+                code: 'TASK_SUBMISSION_NOT_ACCEPTED',
+                message: 'This task can be completed after its submission is accepted.'
+            });
+        }
+
+        const result = await query(
+            `
+                UPDATE project_tasks
+                SET status = $1, updated_at = NOW()
+                WHERE project_id = $2
+                  AND task_id = $3::uuid
+                  AND (
+                    $1 <> 'Done'
+                    OR project_tasks.task_submission_status = 'Completed'
+                  )
+                RETURNING task_id
+            `,
+            [status, project.project_id, req.params.taskId]
+        );
+        if (!result.rowCount) {
+            if (status === 'Done') {
+                return res.status(409).json({
+                    success: false,
+                    code: 'TASK_SUBMISSION_NOT_ACCEPTED',
+                    message: 'A task can move to Done after its submission is accepted.'
+                });
+            }
+            return res.status(404).json({
+                success: false,
+                code: 'TASK_NOT_FOUND',
+                message: 'Task not found.'
+            });
+        }
+        if (status === 'Blocked' && existingTask.rows[0].status !== 'Blocked') {
+            await markDependencyWarnings(
+                req.params.taskId,
+                'blocked',
+                req.firebaseUid,
+                existingTask.rows[0].title
+            );
+        } else if (status !== 'Blocked' && existingTask.rows[0].status === 'Blocked') {
+            await query(
+                                `UPDATE task_dependencies
+                                 SET warning_reason = CASE
+                                         WHEN warning_reason = 'blocked_and_due_date_postponed' THEN 'due_date_postponed'
+                                         ELSE NULL
+                                 END
+                                 WHERE predecessor_task_id = $1::uuid
+                                     AND warning_reason IN ('blocked', 'blocked_and_due_date_postponed')`,
+                [req.params.taskId]
+            );
+        }
+        return res.status(200).json({
+            success: true,
+            data: { taskId: result.rows[0].task_id, status }
+        });
+    } catch (error) {
+        console.error('Update project task status error:', error);
+        return res.status(500).json({
+            success: false,
+            code: 'PROJECT_TASK_STATUS_UPDATE_FAILED',
+            message: 'The project task status could not be updated.'
+        });
+    }
+};
+
+const getProjectTaskDependencies = async (req, res) => {
+    if (!uuidPattern.test(req.params.taskId || '')) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK_ID',
+            message: 'Task ID is invalid.'
+        });
+    }
+    try {
+        const project = await getProjectAndCheckAccess(req.params.projectId, req.firebaseUid);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                code: 'PROJECT_NOT_FOUND',
+                message: 'Project not found.'
+            });
+        }
+        const result = await query(
+            `SELECT predecessor.task_id, predecessor.project_id, predecessor.title,
+                    predecessor.status, predecessor.due_date, dependency.warning_reason
+             FROM task_dependencies dependency
+             JOIN project_tasks dependent
+               ON dependent.task_id = dependency.dependent_task_id
+             JOIN project_tasks predecessor
+               ON predecessor.task_id = dependency.predecessor_task_id
+             WHERE dependent.project_id = $1
+               AND dependent.task_id = $2::uuid
+               AND (
+                   EXISTS (SELECT 1 FROM projects own
+                           WHERE own.project_id = predecessor.project_id
+                             AND own.creator_firebase_uid = $3)
+                   OR EXISTS (SELECT 1 FROM project_invitations access
+                              WHERE access.project_id = predecessor.project_id
+                                AND access.invited_firebase_uid = $3
+                                AND access.status = 'accepted')
+               )
+             ORDER BY predecessor.title`,
+            [project.project_id, req.params.taskId, req.firebaseUid]
+        );
+        return res.status(200).json({ success: true, data: { dependencies: result.rows } });
+    } catch (error) {
+        console.error('Get task dependencies error:', error);
+        return res.status(500).json({
+            success: false,
+            code: 'TASK_DEPENDENCIES_FETCH_FAILED',
+            message: 'Task dependencies could not be retrieved.'
+        });
+    }
+};
+
+const updateProjectTaskDependencies = async (req, res) => {
+    if (!uuidPattern.test(req.params.taskId || '')) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK_ID',
+            message: 'Task ID is invalid.'
+        });
+    }
+    const requested = Array.isArray(req.body?.predecessorTaskIds)
+        ? [...new Set(req.body.predecessorTaskIds)]
+        : null;
+    if (!requested || requested.length > 50 ||
+        requested.some(taskId => !uuidPattern.test(taskId || '')) ||
+        requested.includes(req.params.taskId)) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK_DEPENDENCIES',
+            message: 'Choose up to 50 valid predecessor tasks other than this task.'
+        });
+    }
+
+    try {
+        const project = await getProjectAndCheckAccess(req.params.projectId, req.firebaseUid);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                code: 'PROJECT_NOT_FOUND',
+                message: 'Project not found.'
+            });
+        }
+        const dependent = await query(
+            'SELECT task_id FROM project_tasks WHERE project_id = $1 AND task_id = $2::uuid LIMIT 1',
+            [project.project_id, req.params.taskId]
+        );
+        if (!dependent.rowCount) {
+            return res.status(404).json({
+                success: false,
+                code: 'TASK_NOT_FOUND',
+                message: 'Task not found.'
+            });
+        }
+        const accessiblePredecessors = requested.length
+            ? await query(
+                `SELECT task.task_id
+                 FROM project_tasks task
+                 WHERE task.task_id = ANY($1::uuid[])
+                   AND (
+                       EXISTS (SELECT 1 FROM projects own
+                               WHERE own.project_id = task.project_id
+                                 AND own.creator_firebase_uid = $2)
+                       OR EXISTS (SELECT 1 FROM project_invitations access
+                                  WHERE access.project_id = task.project_id
+                                    AND access.invited_firebase_uid = $2
+                                    AND access.status = 'accepted')
+                   )`,
+                [requested, req.firebaseUid]
+            )
+            : { rows: [] };
+        if (accessiblePredecessors.rowCount !== requested.length) {
+            return res.status(403).json({
+                success: false,
+                code: 'TASK_DEPENDENCY_ACCESS_DENIED',
+                message: 'Every predecessor must be a task in a project you can access.'
+            });
+        }
+        if (requested.length) {
+            const cycle = await query(
+                `WITH RECURSIVE downstream(task_id) AS (
+                     SELECT dependent_task_id
+                     FROM task_dependencies
+                     WHERE predecessor_task_id = $1::uuid
+                     UNION
+                     SELECT dependency.dependent_task_id
+                     FROM task_dependencies dependency
+                     JOIN downstream path ON dependency.predecessor_task_id = path.task_id
+                 )
+                 SELECT EXISTS (
+                     SELECT 1 FROM downstream WHERE task_id = ANY($2::uuid[])
+                 ) AS creates_cycle`,
+                [req.params.taskId, requested]
+            );
+            if (cycle.rows[0]?.creates_cycle) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'TASK_DEPENDENCY_CYCLE',
+                    message: 'This dependency would create a task cycle.'
+                });
+            }
+        }
+
+        await withTransaction(async client => {
+            await client.query(
+                'DELETE FROM task_dependencies WHERE dependent_task_id = $1::uuid',
+                [req.params.taskId]
+            );
+            if (requested.length) {
+                await client.query(
+                    `INSERT INTO task_dependencies (
+                         predecessor_task_id, dependent_task_id, created_by_firebase_uid
+                     )
+                     SELECT predecessor_id, $2::uuid, $3
+                     FROM unnest($1::uuid[]) AS ids(predecessor_id)`,
+                    [requested, req.params.taskId, req.firebaseUid]
+                );
+            }
+        });
+        return res.status(200).json({ success: true, data: { predecessorTaskIds: requested } });
+    } catch (error) {
+        console.error('Update task dependencies error:', error);
+        return res.status(500).json({
+            success: false,
+            code: 'TASK_DEPENDENCIES_UPDATE_FAILED',
+            message: 'Task dependencies could not be saved.'
+        });
+    }
+};
+
+const deleteProjectTask = async (req, res) => {
+    if (!uuidPattern.test(req.params.taskId)) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK_ID',
+            message: 'Task ID is invalid.'
+        });
+    }
+    try {
+        const project = await getProjectAndCheckAccess(req.params.projectId, req.firebaseUid, true);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                code: 'PROJECT_NOT_FOUND',
+                message: 'Project not found or you are not its creator.'
+            });
+        }
+        const result = await query(
+            `
+                DELETE FROM project_tasks
+                WHERE project_id = $1
+                  AND task_id = $2::uuid
+                RETURNING task_id
+            `,
+            [project.project_id, req.params.taskId]
+        );
+        if (!result.rowCount) {
+            return res.status(404).json({
+                success: false,
+                code: 'TASK_NOT_FOUND',
+                message: 'Task not found.'
+            });
+        }
+        return res.status(200).json({
+            success: true,
+            data: { taskId: result.rows[0].task_id }
+        });
+    } catch (error) {
+        console.error('Delete project task error:', error);
+        return res.status(500).json({
+            success: false,
+            code: 'PROJECT_TASK_DELETE_FAILED',
+            message: 'The project task could not be deleted.'
+        });
+    }
+};
+
+module.exports = {
+    createProjectTask,
+    createProjectTaskComment,
+    deleteProjectTask,
+    getProjectTaskDependencies,
+    getProjectTaskComments,
+    getProjectTaskDetails,
+    getProjectTaskAttachment,
+    getProjectTaskSubmissionAttachment,
+    getProjectTasks,
+    reviewProjectTaskSubmission,
+    submitProjectTaskForReview,
+    updateProjectTaskDependencies,
+    updateProjectTask,
+    updateProjectTaskStatus
+};
