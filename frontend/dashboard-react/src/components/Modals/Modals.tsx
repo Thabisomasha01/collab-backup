@@ -1918,7 +1918,7 @@ const TaskEditorModal: React.FC<{
   const [selectedTags, setSelectedTags] = useState<string[]>(() => {
     if (editingTask?.tags?.length) return editingTask.tags;
     if (editingTask?.tag) return [editingTask.tag];
-    return ['Product'];
+    return [];
   });
   const [tagSearch, setTagSearch] = useState('');
   const tagPickerRef = useRef<HTMLDetailsElement>(null);
@@ -1967,9 +1967,9 @@ const TaskEditorModal: React.FC<{
       tag: primaryTag,
       tags: selectedTags,
       sprint: editingTask?.sprint || null,
-      start_date: startDate,
-      due_date: dueDate,
-      description_attachments: attachments
+      startDate,
+      dueDate,
+      descriptionAttachments: attachments
     };
 
     try {
