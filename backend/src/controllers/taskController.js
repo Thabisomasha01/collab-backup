@@ -436,7 +436,12 @@ const markDependencyWarnings = async (taskId, reason, actorUid, taskTitle) => {
     const dependentIds = [...new Set(updated.rows.map(row => row.dependent_task_id))];
     const dependents = await query(
         `SELECT dependent.task_id, dependent.project_id,
-                project.creator_firebase_uid, project.sprints
+                project.creator_firebase_uid,
+                COALESCE((
+                    SELECT jsonb_agg(sprint.details)
+                    FROM project_sprints sprint
+                    WHERE sprint.project_id = project.project_id
+                ), '[]'::jsonb) AS sprints
          FROM project_tasks dependent
          JOIN projects project ON project.project_id = dependent.project_id
          WHERE dependent.task_id = ANY($1::uuid[])`,
@@ -477,7 +482,21 @@ const getProjectAndCheckAccess = async (projectId, firebaseUid, ownerOnly = fals
             SELECT project_id, name, creator_firebase_uid, creator_initials,
                    start_date::text AS start_date,
                    due_date::text AS due_date,
-                   sprints
+                   COALESCE((
+                       SELECT jsonb_agg(
+                           sprint.details || jsonb_build_object(
+                               'id', sprint.sprint_id::text,
+                               'sprintId', sprint.sprint_id::text,
+                               'name', sprint.name,
+                               'status', sprint.status,
+                               'startDate', sprint.start_date::text,
+                               'dueDate', sprint.due_date::text
+                           )
+                           ORDER BY sprint.created_at, sprint.sprint_id
+                       )
+                       FROM project_sprints sprint
+                       WHERE sprint.project_id = p.project_id
+                   ), '[]'::jsonb) AS sprints
             FROM projects p
             WHERE p.project_id = $1
               AND (
@@ -644,21 +663,17 @@ const getProjectTasks = async (req, res) => {
                     OR t.assignee_firebase_uid = $2
                     OR EXISTS (
                         SELECT 1
-                        FROM jsonb_array_elements(
+                        FROM project_sprints sprint
+                        WHERE sprint.project_id = p.project_id
+                          AND (
                             CASE
-                                WHEN jsonb_typeof(p.sprints) = 'array' THEN p.sprints
-                                ELSE '[]'::jsonb
-                            END
-                        ) AS sprint(value)
-                        WHERE (
-                            CASE
-                                WHEN jsonb_typeof(sprint.value->'memberFirebaseUids') = 'array'
-                                    THEN sprint.value->'memberFirebaseUids'
-                                WHEN jsonb_typeof(sprint.value->'member_firebase_uids') = 'array'
-                                    THEN sprint.value->'member_firebase_uids'
+                                WHEN jsonb_typeof(sprint.details->'memberFirebaseUids') = 'array'
+                                    THEN sprint.details->'memberFirebaseUids'
+                                WHEN jsonb_typeof(sprint.details->'member_firebase_uids') = 'array'
+                                    THEN sprint.details->'member_firebase_uids'
                                 ELSE jsonb_build_array(COALESCE(
-                                    NULLIF(sprint.value->>'assigneeFirebaseUid', ''),
-                                    NULLIF(sprint.value->>'assignee_firebase_uid', '')
+                                    NULLIF(sprint.details->>'assigneeFirebaseUid', ''),
+                                    NULLIF(sprint.details->>'assignee_firebase_uid', '')
                                 ))
                             END
                           ) ? $2

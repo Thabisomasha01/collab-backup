@@ -256,207 +256,6 @@ const INVITATION_ROLE_GROUPS = [
   }
 ];
 
-const TASK_TAG_OPTIONS = [...new Set([
-  // General and delivery
-  'Design',
-  'Development',
-  'Marketing',
-  'Product',
-  'Research',
-  'QA',
-  'Bug',
-  'Feature',
-  'Documentation',
-  'Urgent',
-  'Backend',
-  'Frontend',
-  'UI/UX',
-  'DevOps',
-  'Security',
-  'Performance',
-  'Analytics',
-  'Testing',
-  'Planning',
-  'Content',
-  'Accessibility',
-  'Agile',
-  'Automation',
-  'Customer Feedback',
-  'Customer Support',
-  'Internal',
-  'Maintenance',
-  'Release',
-  'Roadmap',
-  'Stakeholder Review',
-  'Training',
-  'Operations',
-  'Strategy',
-  'Compliance',
-  'Risk',
-  'Documentation Update',
-  'Process Improvement',
-  'Incident',
-  'Technical Debt',
-  // Technology
-  'API',
-  'Architecture',
-  'Authentication',
-  'Authorization',
-  'Backend',
-  'Build',
-  'CI/CD',
-  'Cloud',
-  'Code Review',
-  'Database',
-  'Data Engineering',
-  'Data Science',
-  'Deployment',
-  'DevOps',
-  'Frontend',
-  'Full Stack',
-  'Infrastructure',
-  'Integration',
-  'iOS',
-  'Android',
-  'JavaScript',
-  'TypeScript',
-  'Python',
-  'Java',
-  'Go',
-  '.NET',
-  'React',
-  'Node.js',
-  'Microservices',
-  'Networking',
-  'Observability',
-  'Performance',
-  'Platform',
-  'Reliability',
-  'Scalability',
-  'Security',
-  'SEO',
-  'Software',
-  'Technical Writing',
-  'UI/UX',
-  'Usability',
-  'Web',
-  'Mobile',
-  'Machine Learning',
-  'AI',
-  'Analytics',
-  'Business Intelligence',
-  'Big Data',
-  'ETL',
-  'Data Governance',
-  'Data Quality',
-  'Experimentation',
-  'Quality Assurance',
-  'Regression Testing',
-  'Unit Testing',
-  'End-to-End Testing',
-  'Research and Development',
-  // Finance and accounting
-  'Accounting',
-  'Accounts Payable',
-  'Accounts Receivable',
-  'Audit',
-  'Banking',
-  'Billing',
-  'Bookkeeping',
-  'Budget',
-  'Budgeting',
-  'Capital',
-  'Cash Flow',
-  'Collections',
-  'Corporate Finance',
-  'Cost Management',
-  'Credit',
-  'Expense Management',
-  'Financial Analysis',
-  'Financial Modeling',
-  'Financial Planning',
-  'Financial Reporting',
-  'Forecasting',
-  'Fraud Prevention',
-  'Fundraising',
-  'Insurance',
-  'Investment',
-  'Investor Relations',
-  'Invoicing',
-  'Payroll',
-  'Procurement',
-  'Profitability',
-  'Reconciliation',
-  'Revenue',
-  'Tax',
-  'Treasury',
-  'Valuation',
-  'Venture Capital',
-  // Corporate and business
-  'Administration',
-  'B2B',
-  'B2C',
-  'Business Analysis',
-  'Business Development',
-  'Change Management',
-  'Communications',
-  'Contract Management',
-  'Corporate',
-  'Corporate Development',
-  'Corporate Governance',
-  'Customer Experience',
-  'Customer Success',
-  'Diversity and Inclusion',
-  'Employee Experience',
-  'Employee Relations',
-  'Facilities',
-  'Human Resources',
-  'Learning and Development',
-  'Legal',
-  'Logistics',
-  'Management',
-  'Mergers and Acquisitions',
-  'Office Management',
-  'Partnerships',
-  'People Operations',
-  'Policy',
-  'Product Operations',
-  'Project Management',
-  'Public Relations',
-  'Regulatory',
-  'Sales',
-  'Sales Operations',
-  'Vendor Management',
-  // Marketing and communications
-  'Advertising',
-  'Brand',
-  'Brand Awareness',
-  'Campaign',
-  'Communications Strategy',
-  'Copywriting',
-  'Digital Marketing',
-  'Email Marketing',
-  'Events',
-  'Lead Generation',
-  'Market Research',
-  'Media',
-  'Positioning',
-  'Social Media',
-  'Thought Leadership',
-  'Video',
-  'Content Strategy',
-  'Customer Research',
-  'Product Marketing',
-  'Publicity'
-])];
-
-const normalizeTaskTagSearch = (value: string) =>
-  value
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim();
-
 function formatDurationInMonths(weeks: number): string {
   if (weeks < 4) return 'Less than 1 Month';
   const months = Math.round(weeks / 4);
@@ -1288,21 +1087,13 @@ const AddSprintModal: React.FC<{ projectId: string }> = ({ projectId }) => {
       return;
     }
     setSubmitting(true);
-    const updatedSprints = [
-      ...(project.sprints || []),
-      {
-        id: `s_${Date.now()}`,
+    try {
+      await api.post(`/projects/${encodeURIComponent(project.projectId)}/sprints`, {
         name: sName,
         description: description.trim(),
-        status: 'Active',
         startDate,
         dueDate,
         attachments
-      }
-    ];
-    try {
-      await api.put(`/projects/${encodeURIComponent(project.projectId)}`, {
-        sprints: updatedSprints
       });
       await loadProjectsFromAPI({ silent: true });
       addAuditLog('Sprint created', `Added "${sName}" to ${project.name}.`, 'flag');
@@ -1977,20 +1768,19 @@ const AddTaskModal: React.FC<{
   const [description, setDescription] = useState(
     editingTask?.description || prefill?.description || ''
   );
-  const [status, setStatus] = useState<TaskStatus>(
+  const [status] = useState<TaskStatus>(
     editingTask?.status ||
       (modalState.type === 'createTask' && modalState.defaultStatus) ||
       'To do'
   );
-  const [priority, setPriority] = useState<TaskPriority>(
+  const [priority] = useState<TaskPriority>(
     editingTask?.priority || prefill?.priority || 'medium'
   );
-  const [selectedTags, setSelectedTags] = useState<string[]>(() => {
+  const [selectedTags] = useState<string[]>(() => {
     if (editingTask?.tags?.length) return editingTask.tags;
     if (editingTask?.tag) return [editingTask.tag];
     return [];
   });
-  const [tagSearch, setTagSearch] = useState('');
   const tagPickerRef = useRef<HTMLDetailsElement>(null);
   const assigneePickerRef = useRef<HTMLDetailsElement>(null);
   const [assigneeFirebaseUid, setAssigneeFirebaseUid] = useState(
@@ -2033,21 +1823,6 @@ const AddTaskModal: React.FC<{
   const selectedAssignee = assigneeOptions.find(
     (member) => member.firebaseUid === assigneeFirebaseUid
   );
-
-  const filteredTags = useMemo(() => {
-    const query = normalizeTaskTagSearch(tagSearch);
-    if (!query) return TASK_TAG_OPTIONS;
-    const terms = query.split(/\s+/);
-    const compactQuery = query.replace(/[\s\W_]+/g, '');
-    return TASK_TAG_OPTIONS.filter((tag) => {
-      const normalizedTag = normalizeTaskTagSearch(tag);
-      const compactTag = normalizedTag.replace(/[\s\W_]+/g, '');
-      return (
-        compactTag.includes(compactQuery) ||
-        terms.every((term) => normalizedTag.includes(term))
-      );
-    });
-  }, [tagSearch]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

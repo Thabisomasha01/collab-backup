@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  BarChart3,
   Calendar as CalendarIcon,
   Check,
   ChevronLeft,
@@ -71,7 +70,6 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
   project,
   allProjects,
   tasks,
-  allTasks,
   canViewTaskMetrics,
   onOpenProgressAside,
   onToggleTaskDone,
@@ -86,8 +84,6 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
   const [dismissedActivityIds, setDismissedActivityIds] = useState<Record<string, boolean>>({});
 
   const projectPool = allProjects && allProjects.length > 0 ? allProjects : [project];
-  const taskPool = allTasks && allTasks.length > 0 ? allTasks : tasks;
-
   const completedCount = tasks.filter((t) => t.status === 'Done').length;
   const inProgressCount = tasks.filter((t) => t.status === 'In progress').length;
   const todoCount = tasks.filter((t) => t.status === 'To do' || t.status === 'Backlog').length;
@@ -103,7 +99,6 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
     const dueDate = (task.date || task.due_date || '').slice(0, 10);
     return dueDate && dueDate >= todayKey && dueDate <= dueSoonLimitKey && task.status !== 'Done';
   }).length;
-  const projectRingCircumference = 2 * Math.PI * 36;
   const visibleTasks = useMemo(() => {
     return tasks.filter((t) => (taskFilter === 'pending' ? t.status !== 'Done' : true));
   }, [tasks, taskFilter]);
@@ -118,14 +113,6 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
     return [ordered[start], ordered[(start + 1) % ordered.length]];
   }, [project, projectPool, spotlightOffset]);
   const detailsProject = spotlightProjects[0] || project;
-  const detailsTasks = taskPool.filter((task) => task.projectId === detailsProject.projectId);
-  const detailsCompletedCount = detailsTasks.filter((task) => task.status === 'Done').length;
-  const detailsCompletionPercentage = detailsTasks.length > 0
-    ? Math.round((detailsCompletedCount / detailsTasks.length) * 100)
-    : 0;
-  const detailsRingOffset =
-    projectRingCircumference * (1 - detailsCompletionPercentage / 100);
-
   const showPreviousProject = () =>
     setSpotlightOffset((prev) =>
       prev === 0 ? Math.max(0, projectPool.length - 1) : prev - 1

@@ -158,6 +158,8 @@ export interface ProjectSprint {
   end_date?: string | null;
   dueDate?: string | null;
   status?: string;
+  projectId?: string;
+  attachments?: MediaAttachment[];
   memberFirebaseUids?: string[];
   member_firebase_uids?: string[];
   assigneeFirebaseUid?: string;

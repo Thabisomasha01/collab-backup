@@ -6,7 +6,7 @@ import {
   getUserInitials,
   useDashboard
 } from '../../context/DashboardContext';
-import { api, apiBaseUrl } from '../../services/api';
+import { api } from '../../services/api';
 import type {
   MediaAttachment,
   Project,
@@ -16,7 +16,6 @@ import type {
   TaskItem
 } from '../../types/dashboard';
 import { createCx } from '../../utils/cx';
-import { FileTypeIcon, formatFileSize } from '../../utils/fileIcons';
 import { TaskMediaEditor, TaskMediaPlayers } from '../TaskMediaEditor';
 import styles from './ProjectProgressAside.module.css';
 
@@ -175,7 +174,6 @@ export const ProjectProgressAside: React.FC = () => {
   const [expandedSprintNames, setExpandedSprintNames] = useState<Set<string>>(new Set());
   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(new Set());
   const [sprintFeedbackMap, setSprintFeedbackMap] = useState<Record<string, string>>({});
-  const [taskReviewNoteMap, setTaskReviewNoteMap] = useState<Record<string, string>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [animateCharts, setAnimateCharts] = useState(false);
   const [previewMedia, setPreviewMedia] = useState<MediaAttachment | null>(null);
@@ -189,7 +187,7 @@ export const ProjectProgressAside: React.FC = () => {
     );
   }, [accessibleTasks, project]);
   const sprintList =
-    fetchedSprintData?.projectId === project?.projectId
+    fetchedSprintData && fetchedSprintData.projectId === project?.projectId
       ? fetchedSprintData.sprints
       : project?.sprints ?? [];
 
@@ -202,20 +200,9 @@ export const ProjectProgressAside: React.FC = () => {
     let cancelled = false;
     setFetchedSprintData(null);
     api
-      .get('/projects')
+      .get(`/projects/${encodeURIComponent(project.projectId)}/sprints`)
       .then((response) => {
-        const projects = response?.data?.projects;
-        if (!Array.isArray(projects)) {
-          throw new Error('The server returned an invalid projects response.');
-        }
-        const fetchedProject = projects.find(
-          (item: Record<string, unknown>) =>
-            String(item.project_id || item.projectId || item.id || '') === project.projectId
-        );
-        if (!fetchedProject) {
-          throw new Error('The selected project could not be found.');
-        }
-        const sprints = fetchedProject.sprints;
+        const sprints = response?.data?.sprints;
         if (!Array.isArray(sprints)) {
           throw new Error('The server returned an invalid project sprints response.');
         }
@@ -431,60 +418,6 @@ export const ProjectProgressAside: React.FC = () => {
     }
   };
 
-  const handleReviewTaskSubmission = async (
-    task: TaskItem,
-    decision: 'accept' | 'request_changes'
-  ) => {
-    if (!project?.projectId) return;
-    const tid = String(task.taskId || task.id);
-    const comment = (taskReviewNoteMap[tid] || '').trim();
-    if (decision === 'request_changes' && !comment) {
-      showDashboardToast('Please include feedback when requesting changes.', 'error');
-      return;
-    }
-    setBusyKey(`task-review:${tid}`);
-    try {
-      await api.post(
-        `/projects/${encodeURIComponent(project.projectId)}/tasks/${encodeURIComponent(tid)}/review-submission`,
-        { decision, comment }
-      );
-      await loadAllProjectTasks();
-      setTaskReviewNoteMap((prev) => ({ ...prev, [tid]: '' }));
-      showDashboardToast(
-        decision === 'accept' ? 'Submission approved.' : 'Revision feedback sent.',
-        'success'
-      );
-    } catch (err: any) {
-      showDashboardToast(err?.message || 'Unable to review task submission.', 'error');
-    } finally {
-      setBusyKey(null);
-    }
-  };
-
-  const handleDownloadTaskAttachment = async (task: TaskItem, index: number, fileName: string) => {
-    if (!project?.projectId) return;
-    const tid = String(task.taskId || task.id);
-    try {
-      const token = await firebaseUser?.getIdToken();
-      const url = `${apiBaseUrl}/api/projects/${encodeURIComponent(project.projectId)}/tasks/${encodeURIComponent(tid)}/submission-attachments/${index}`;
-      const resp = await fetch(url, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      });
-      if (!resp.ok) throw new Error('Unable to download attachment.');
-      const blob = await resp.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = fileName || `attachment-${index + 1}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1500);
-    } catch (err: any) {
-      showDashboardToast(err?.message || 'Download failed.', 'error');
-    }
-  };
-
   const handleSubmitSprint = async (sprint: ProjectSprint) => {
     if (!project?.projectId) return;
     setBusyKey(`sprint-submit:${sprint.name}`);
@@ -537,28 +470,17 @@ export const ProjectProgressAside: React.FC = () => {
     const confirmed = await showDashboardConfirmation({
       eyebrow: 'Sprint Schedule',
       title: `Remove ${sprint.name}?`,
-      message:
-        'Removing this sprint will renumber remaining sprints and cannot be undone.',
+      message: 'Removing this sprint cannot be undone.',
       confirmLabel: 'Remove Sprint',
       destructive: true
     });
     if (!confirmed) return;
     setBusyKey(`sprint-remove:${sprint.name}`);
     try {
-      const remaining = sprintList
-        .filter((s) => s.name !== sprint.name)
-        .map((s, idx) => {
-          const stripped = String(s.name || '').replace(/^Sprint\s+\d+\s*:\s*/i, '');
-          return {
-            ...s,
-            name: `Sprint ${idx + 1}: ${stripped || s.name}`
-          };
-        });
-      await api.put(`/projects/${encodeURIComponent(project.projectId)}`, {
-        sprints: remaining
-      });
+      await api.delete(
+        `/projects/${encodeURIComponent(project.projectId)}/sprints/${encodeURIComponent(String(sprint.sprintId || sprint.id))}`
+      );
       await loadProjectsFromAPI({ silent: true });
-      await loadAllProjectTasks();
       showDashboardToast('Sprint removed.', 'success');
     } catch (err: any) {
       showDashboardToast(err?.message || 'Unable to remove sprint.', 'error');
@@ -627,7 +549,7 @@ export const ProjectProgressAside: React.FC = () => {
               tone: 'is-planned',
               text:
                 totalTasks > 0
-                  ? `${counts.progress} active and ${counts.todo} queued tasks remaining across ${sprints.length} sprint(s).`
+                  ? `${counts.progress} active and ${counts.todo} queued tasks remaining across ${sprintList.length} sprint(s).`
                   : 'Add tasks to this project board to track burndown and delivery velocity.'
             };
 
@@ -1592,17 +1514,15 @@ export const ProjectProgressAside: React.FC = () => {
                     <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
                   </svg>
                 </span>
-                <h3>Project Tasks &amp; Sprints</h3>
+                <h3>Project Sprints</h3>
               </div>
                 <span className={cx('project-progress-aside-count')}>
-                  {projectTasks.length + sprintList.length}
+                  {sprintList.length}
                 </span>
               </div>
 
-              {projectTasks.length === 0 && sprintList.length === 0 ? (
-                <p className={cx('project-progress-aside-empty')}>
-                  No tasks or sprints on this board yet.
-                </p>
+              {sprintList.length === 0 ? (
+                <p className={cx('project-progress-aside-empty')}>No sprints on this board yet.</p>
               ) : (
                 <div className={cx('project-progress-aside-tasks')}>
                   {sprintList.map((sprint) => {
@@ -1674,158 +1594,6 @@ export const ProjectProgressAside: React.FC = () => {
                       </div>
                     );
                   })}
-
-                  {projectTasks.map((t) => {
-                  const tid = String(t.taskId || t.id);
-                  const expanded = expandedTaskIds.has(tid) || tid === taskIdStr;
-                  const subStatus = String(
-                    t.taskSubmissionStatus || t.submission_status || ''
-                  ).toLowerCase();
-                  const subAttachments = Array.isArray(t.submissionAttachments)
-                    ? t.submissionAttachments
-                    : [];
-
-                  return (
-                    <div
-                      key={tid}
-                      className={cx(
-                        'project-progress-aside-task',
-                        expanded && 'is-expanded',
-                        tid === taskIdStr && 'is-selected'
-                      )}
-                    >
-                      <button
-                        type="button"
-                        className={cx('project-progress-aside-task-toggle')}
-                        aria-expanded={expanded}
-                        onClick={() => {
-                          setExpandedTaskIds((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(tid)) next.delete(tid);
-                            else next.add(tid);
-                            return next;
-                          });
-                        }}
-                      >
-                        <div className={cx('project-progress-aside-task-summary')}>
-                          <strong>{t.title}</strong>
-                          <span>
-                            {t.sprint || 'No sprint'} • Due {formatDateShort(getTaskDueDateKey(t))}
-                          </span>
-                        </div>
-                        <span
-                          className={cx(
-                            'project-progress-aside-task-status',
-                            getTaskStatusBadgeClass(t.status)
-                          )}
-                        >
-                          {t.status}
-                        </span>
-                      </button>
-
-                      {expanded && (
-                        <div className={cx('project-progress-aside-task-details')}>
-                          {t.description && (
-                            <p className={cx('project-progress-aside-task-description')}>
-                              {t.description}
-                            </p>
-                          )}
-
-                          {Array.isArray(t.descriptionAttachments) &&
-                            t.descriptionAttachments.length > 0 && (
-                              <TaskMediaPlayers attachments={t.descriptionAttachments} />
-                            )}
-
-                          {subAttachments.length > 0 && (
-                            <div className="project-task-sprint-submission">
-                              <div className="project-task-sprint-submission-title">
-                                Submitted Attachments
-                              </div>
-                              <div className="project-task-sprint-submission-links">
-                                {subAttachments.map((att, aIdx) => (
-                                  <button
-                                    key={aIdx}
-                                    type="button"
-                                    className="project-task-sprint-submission-link"
-                                    onClick={() =>
-                                      handleDownloadTaskAttachment(
-                                        t,
-                                        aIdx,
-                                        att.fileName || att.name || `submission-${aIdx + 1}`
-                                      )
-                                    }
-                                  >
-                                    <FileTypeIcon
-                                      fileName={att.fileName || att.name}
-                                      mimeType={att.mimeType}
-                                      size={14}
-                                    />
-                                    <span>{att.fileName || att.name || 'Download file'}</span>
-                                    {att.size ? <small>({formatFileSize(att.size)})</small> : null}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {isOwner && subStatus === 'pending_review' && (
-                            <div className="project-task-sprint-review-form">
-                              <textarea
-                                rows={2}
-                                value={taskReviewNoteMap[tid] || ''}
-                                onChange={(e) =>
-                                  setTaskReviewNoteMap((prev) => ({
-                                    ...prev,
-                                    [tid]: e.target.value
-                                  }))
-                                }
-                                placeholder="Review comment or revision request…"
-                              />
-                              <div className={cx('project-progress-analysis-actions')}>
-                                <button
-                                  type="button"
-                                  className="primary-button gold"
-                                  disabled={busyKey === `task-review:${tid}`}
-                                  onClick={() => handleReviewTaskSubmission(t, 'accept')}
-                                >
-                                  Approve Deliverable
-                                </button>
-                                <button
-                                  type="button"
-                                  className="outline-button"
-                                  disabled={busyKey === `task-review:${tid}`}
-                                  onClick={() => handleReviewTaskSubmission(t, 'request_changes')}
-                                >
-                                  Request Changes
-                                </button>
-                              </div>
-                            </div>
-                          )}
-
-                          {t.status !== 'Done' && (
-                            <div>
-                              <button
-                                type="button"
-                                className={cx('project-progress-aside-complete')}
-                                disabled={
-                                  busyKey === `complete:${tid}` || subStatus !== 'completed'
-                                }
-                                onClick={() => handleCompleteTask(t)}
-                              >
-                                ✓ Mark Task Done
-                              </button>
-                              {subStatus !== 'completed' && (
-                                <span className="project-task-status-lock">
-                                  Requires approved submission before marking Done.
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
               </div>
             )}
           </section>

@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  BarChart3,
   Calendar as CalendarIcon,
   Check,
   CheckCircle2,
@@ -17,7 +16,6 @@ import {
   Trash2,
   UserCircle2,
   UserPlus,
-  Users,
   X
 } from 'lucide-react';
 import type {
