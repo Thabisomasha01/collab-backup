@@ -9,6 +9,7 @@ import { firebaseAuth } from '../../services/firebase';
 import type {
   MediaAttachment,
   Project,
+  ProjectMember,
   TaskItem,
   TaskPriority,
   TaskStatus
@@ -841,7 +842,7 @@ export const Modals: React.FC = () => {
         <ManageCollaboratorsModal projectId={activeModal.projectId} />
       )}
       {(activeModal.type === 'createTask' || activeModal.type === 'editTask') && (
-        <TaskEditorModal modalState={activeModal} />
+        <AddTaskModal modalState={activeModal} />
       )}
       {activeModal.type === 'scheduleMeeting' && (
         <ScheduleMeetingModal
@@ -1264,7 +1265,16 @@ const AddSprintModal: React.FC<{ projectId: string }> = ({ projectId }) => {
 
   const project = projects.find((p) => p.projectId === projectId || p.id === projectId);
   const [name, setName] = useState('');
-  const [status, setStatus] = useState('Active');
+  const [description, setDescription] = useState('');
+  const todayKey = toLocalDateKey();
+  const projectStartDate = normalizeDateKey(project?.startDate);
+  const minDate =
+    projectStartDate && projectStartDate > todayKey ? projectStartDate : todayKey;
+  const projectDueDate = normalizeDateKey(project?.dueDate);
+  const maxDate = projectDueDate && projectDueDate >= minDate ? projectDueDate : null;
+  const [startDate, setStartDate] = useState(minDate);
+  const [dueDate, setDueDate] = useState(minDate);
+  const [attachments, setAttachments] = useState<MediaAttachment[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   if (!project) return null;
@@ -1273,10 +1283,22 @@ const AddSprintModal: React.FC<{ projectId: string }> = ({ projectId }) => {
     e.preventDefault();
     const sName = name.trim();
     if (!sName) return;
+    if (dueDate < startDate) {
+      showDashboardToast('Sprint due date cannot be before its start date.', 'error');
+      return;
+    }
     setSubmitting(true);
     const updatedSprints = [
       ...(project.sprints || []),
-      { id: `s_${Date.now()}`, name: sName, status }
+      {
+        id: `s_${Date.now()}`,
+        name: sName,
+        description: description.trim(),
+        status: 'Active',
+        startDate,
+        dueDate,
+        attachments
+      }
     ];
     try {
       await api.put(`/projects/${encodeURIComponent(project.projectId)}`, {
@@ -1300,22 +1322,34 @@ const AddSprintModal: React.FC<{ projectId: string }> = ({ projectId }) => {
         if (e.target === e.currentTarget) closeModal();
       }}
     >
-      <form className="modal" onSubmit={handleSubmit}>
-        <button type="button" className="close-modal" aria-label="Close" onClick={closeModal}>
-          ×
-        </button>
+      <form
+        className="modal project-task-parent-form project-task-editor-modal"
+        onSubmit={handleSubmit}
+      >
+        <div className="project-task-editor-header">
+          <div>
+            <span className="messages-create-eyebrow">NEW SPRINT</span>
+            <h2>Create Project Sprint</h2>
+            <p className="modal-copy">
+              Set sprint deliverables, schedule dates, and media context.
+            </p>
+          </div>
+          <button type="button" className="close-modal" aria-label="Close" onClick={closeModal}>
+            ×
+          </button>
+        </div>
         <div className="modal-body">
-          <p className="eyebrow">PROJECT MILESTONE</p>
-          <h2>Add Sprint to {project.name}</h2>
-          <p className="modal-copy">
-            Define a new sprint milestone to organize deliverables on this board.
-          </p>
+          <label>
+            Project Board
+            <input type="text" value={project.name} readOnly />
+          </label>
 
           <label>
-            Sprint Name
+            Sprint Title
             <input
               type="text"
               required
+              maxLength={255}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Sprint 2: API Integration"
@@ -1323,17 +1357,45 @@ const AddSprintModal: React.FC<{ projectId: string }> = ({ projectId }) => {
             />
           </label>
 
+          <div className="cal-schedule-picker-card">
+            <div className="cal-schedule-header">
+              <div className="cal-schedule-title">
+                <span>🗓️ Due Date / Schedule Timeline</span>
+              </div>
+            </div>
+            <DualDateRangeCalendars
+              startDate={startDate}
+              dueDate={dueDate}
+              minDate={minDate}
+              maxDate={maxDate}
+              onChangeStart={setStartDate}
+              onChangeDue={setDueDate}
+            />
+          </div>
+
           <label>
-            Sprint Status
-            <select value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="Active">Active</option>
-              <option value="Upcoming">Upcoming</option>
-              <option value="Completed">Completed</option>
-            </select>
+            Description
+            <textarea
+              rows={3}
+              maxLength={10000}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Sprint goals, acceptance criteria, or deliverable instructions…"
+            />
           </label>
 
-          <button type="submit" className="primary-button full gold" disabled={submitting}>
-            {submitting ? 'Adding sprint…' : 'Add Sprint to Project'}
+          <TaskMediaEditor
+            attachments={attachments}
+            onChange={setAttachments}
+            label="Task Attachments & Recordings"
+          />
+
+          <button
+            type="submit"
+            className="primary-button full gold project-task-submit-button"
+            disabled={submitting}
+          >
+            {submitting ? 'Creating sprint…' : 'Create Sprint'}
           </button>
         </div>
       </form>
@@ -1818,12 +1880,12 @@ const ManageCollaboratorsModal: React.FC<{ projectId: string }> = ({ projectId }
 // CREATE / EDIT TASK MODAL
 // ==========================================================
 
-const TaskEditorModal: React.FC<{
+const AddTaskModal: React.FC<{
   modalState:
     | {
         type: 'createTask';
-        projectId?: string;
-        defaultStatus?: TaskStatus;
+          projectId?: string;
+          defaultStatus?: TaskStatus;
         defaultDate?: string;
         prefill?: {
           title?: string;
@@ -1882,10 +1944,18 @@ const TaskEditorModal: React.FC<{
     const pStart = normalizeDateKey(targetProject?.startDate);
     return pStart && pStart > todayKey ? pStart : todayKey;
   }, [targetProject?.startDate, todayKey]);
-  const maxProjectDate = useMemo(
-    () => normalizeDateKey(targetProject?.dueDate),
-    [targetProject?.dueDate]
-  );
+  const maxProjectDate = useMemo(() => {
+    const projectDueDate = normalizeDateKey(targetProject?.dueDate);
+    const activeSprint =
+      targetProject?.sprints?.find((sprint) =>
+        ['active', 'in progress'].includes(String(sprint.status || '').toLowerCase())
+      ) || targetProject?.sprints?.[0];
+    const sprintDueDate = normalizeDateKey(
+      activeSprint?.dueDate || activeSprint?.endDate || activeSprint?.end_date
+    );
+    const dates = [projectDueDate, sprintDueDate].filter((date): date is string => Boolean(date));
+    return dates.sort()[0] || null;
+  }, [targetProject?.dueDate, targetProject?.sprints]);
 
   const clampDate = (val?: string | null) => {
     const dk = normalizeDateKey(val);
@@ -1922,6 +1992,10 @@ const TaskEditorModal: React.FC<{
   });
   const [tagSearch, setTagSearch] = useState('');
   const tagPickerRef = useRef<HTMLDetailsElement>(null);
+  const assigneePickerRef = useRef<HTMLDetailsElement>(null);
+  const [assigneeFirebaseUid, setAssigneeFirebaseUid] = useState(
+    editingTask?.assigneeFirebaseUid || editingTask?.assignee_firebase_uid || ''
+  );
   const [startDate, setStartDate] = useState(() =>
     clampDate(editingTask?.startDate || editingTask?.start_date || todayKey)
   );
@@ -1931,6 +2005,34 @@ const TaskEditorModal: React.FC<{
   );
 
   const [submitting, setSubmitting] = useState(false);
+  const assigneeOptions = useMemo(() => {
+    if (!targetProject) return [];
+    const members: ProjectMember[] = [
+      {
+        firebaseUid: targetProject.creatorFirebaseUid || undefined,
+        name: targetProject.creatorName,
+        email: targetProject.creatorEmail,
+        initials: targetProject.creatorInitials,
+        profileImage: targetProject.creatorProfileImage,
+        role: 'Project Owner'
+      },
+      ...(Array.isArray(targetProject.acceptedMembers) ? targetProject.acceptedMembers : [])
+    ];
+    const uniqueMembers = new Map<string, ProjectMember>();
+    members.forEach((member) => {
+      const uid = String(member.firebaseUid || member.firebase_uid || member.uid || '').trim();
+      if (!uid) return;
+      uniqueMembers.set(uid, {
+        ...member,
+        firebaseUid: uid,
+        name: member.name || member.email || 'Project member'
+      });
+    });
+    return [...uniqueMembers.values()];
+  }, [targetProject]);
+  const selectedAssignee = assigneeOptions.find(
+    (member) => member.firebaseUid === assigneeFirebaseUid
+  );
 
   const filteredTags = useMemo(() => {
     const query = normalizeTaskTagSearch(tagSearch);
@@ -1966,6 +2068,7 @@ const TaskEditorModal: React.FC<{
       category: primaryTag,
       tag: primaryTag,
       tags: selectedTags,
+      assigneeFirebaseUid: assigneeFirebaseUid || null,
       sprint: editingTask?.sprint || null,
       startDate,
       dueDate,
@@ -2011,6 +2114,7 @@ const TaskEditorModal: React.FC<{
             !event.target.closest('.project-task-tag-picker')
           ) {
             tagPickerRef.current?.removeAttribute('open');
+            assigneePickerRef.current?.removeAttribute('open');
           }
         }}
         onSubmit={handleSubmit}
@@ -2035,7 +2139,10 @@ const TaskEditorModal: React.FC<{
             <select
               value={selectedProjectId}
               disabled={isEdit}
-              onChange={(e) => setSelectedProjectId(e.target.value)}
+              onChange={(e) => {
+                setSelectedProjectId(e.target.value);
+                setAssigneeFirebaseUid('');
+              }}
             >
               {selectableProjects.map((p) => (
                 <option key={p.projectId} value={p.projectId}>
@@ -2044,6 +2151,70 @@ const TaskEditorModal: React.FC<{
               ))}
             </select>
           </label>
+
+          <div className="project-task-assignee-field">
+            <span>Assign to</span>
+            <details
+              ref={assigneePickerRef}
+              className="project-task-tag-picker project-task-assignee-picker"
+            >
+              <summary className="project-task-tag-picker-summary">
+                {selectedAssignee?.name || 'Unassigned'}
+              </summary>
+              <div
+                className="project-task-assignee-options"
+                role="radiogroup"
+                aria-label="Assign task to one project member"
+              >
+                <label
+                  className={`project-task-assignee-option${!assigneeFirebaseUid ? ' selected' : ''}`}
+                >
+                  <span className="project-task-assignee-option-avatar">—</span>
+                  <span>Unassigned</span>
+                  <input
+                    type="radio"
+                    name="task-assignee"
+                    value=""
+                    checked={!assigneeFirebaseUid}
+                    onChange={() => {
+                      setAssigneeFirebaseUid('');
+                      assigneePickerRef.current?.removeAttribute('open');
+                    }}
+                  />
+                </label>
+                {assigneeOptions.map((member) => (
+                  <label
+                    key={member.firebaseUid}
+                    className={`project-task-assignee-option${
+                      assigneeFirebaseUid === member.firebaseUid ? ' selected' : ''
+                    }`}
+                  >
+                    <span className="messages-create-avatar">
+                      {member.profileImage || member.profile_image || member.photoURL ? (
+                        <img
+                          src={String(member.profileImage || member.profile_image || member.photoURL)}
+                          alt=""
+                        />
+                      ) : (
+                        member.initials || getUserInitials(member.name || 'Project member')
+                      )}
+                    </span>
+                    <span>{member.name}</span>
+                    <input
+                      type="radio"
+                      name="task-assignee"
+                      value={member.firebaseUid}
+                      checked={assigneeFirebaseUid === member.firebaseUid}
+                      onChange={() => {
+                        setAssigneeFirebaseUid(member.firebaseUid || '');
+                        assigneePickerRef.current?.removeAttribute('open');
+                      }}
+                    />
+                  </label>
+                ))}
+              </div>
+            </details>
+          </div>
 
           <label>
             Task Title

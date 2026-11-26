@@ -286,6 +286,8 @@ const normalizeTaskInput = body => {
     const dueDate = body?.dueDate || null;
     const chatMessageId = body?.chatMessageId || null;
     const descriptionAttachments = body?.descriptionAttachments ?? [];
+    const assigneeProvided = body?.assigneeFirebaseUid !== undefined;
+    const assigneeFirebaseUid = body?.assigneeFirebaseUid;
 
     if (!title || title.length > 255) {
         return { error: 'Task title is required and cannot exceed 255 characters.' };
@@ -313,6 +315,14 @@ const normalizeTaskInput = body => {
     if (chatMessageId !== null && !uuidPattern.test(chatMessageId)) {
         return { error: 'The discussion message reference is invalid.' };
     }
+    if (
+        assigneeProvided &&
+        assigneeFirebaseUid !== null &&
+        assigneeFirebaseUid !== '' &&
+        (typeof assigneeFirebaseUid !== 'string' || assigneeFirebaseUid.trim().length > 128)
+    ) {
+        return { error: 'Choose a valid project member to assign this task to.' };
+    }
     if (!validTaskAttachments(descriptionAttachments)) {
         return { error: 'Task media must be valid attachments totaling 100 MB or less.' };
     }
@@ -339,9 +349,38 @@ const normalizeTaskInput = body => {
             startDate,
             dueDate,
             chatMessageId,
-            descriptionAttachments
+            descriptionAttachments,
+            assigneeProvided,
+            assigneeFirebaseUid:
+                typeof assigneeFirebaseUid === 'string' && assigneeFirebaseUid.trim()
+                    ? assigneeFirebaseUid.trim()
+                    : null
         }
     };
+};
+
+const validateProjectTaskAssignee = async (projectId, firebaseUid) => {
+    if (!firebaseUid) return true;
+    const result = await query(
+        `
+            SELECT 1
+            FROM projects project
+            WHERE project.project_id = $1
+              AND (
+                    project.creator_firebase_uid = $2
+                    OR EXISTS (
+                        SELECT 1
+                        FROM project_invitations invitation
+                        WHERE invitation.project_id = project.project_id
+                          AND invitation.invited_firebase_uid = $2
+                          AND invitation.status = 'accepted'
+                    )
+              )
+            LIMIT 1
+        `,
+        [projectId, firebaseUid]
+    );
+    return result.rowCount > 0;
 };
 
 const validateChatMessageLink = async (projectId, messageId, firebaseUid) => {
@@ -466,13 +505,24 @@ const validateTaskProjectTimeline = (project, task) => {
     const projectDueDate = toProjectDateKey(project.due_date);
     const taskStartDate = task.startDate;
     const taskDueDate = task.dueDate;
+    const sprint = Array.isArray(project.sprints)
+        ? project.sprints.find(item => ['active', 'in progress'].includes(String(item?.status || '').toLowerCase()))
+            || project.sprints[0]
+        : null;
+    const sprintDueDate = toProjectDateKey(
+        sprint?.dueDate || sprint?.due_date || sprint?.endDate || sprint?.end_date
+    );
 
     if (
         (taskStartDate && projectStartDate && taskStartDate < projectStartDate) ||
         (taskDueDate && projectDueDate && taskDueDate > projectDueDate) ||
         (taskStartDate && projectDueDate && taskStartDate > projectDueDate) ||
-        (taskDueDate && projectStartDate && taskDueDate < projectStartDate)
+        (taskDueDate && projectStartDate && taskDueDate < projectStartDate) ||
+        (taskDueDate && sprintDueDate && taskDueDate > sprintDueDate)
     ) {
+        if (taskDueDate && sprintDueDate && taskDueDate > sprintDueDate) {
+            return `Task due date must be on or before the active sprint deadline (${sprintDueDate}).`;
+        }
         return `Task dates must fall within the project timeline (${projectStartDate || 'any start date'} to ${projectDueDate || 'any due date'}).`;
     }
 
@@ -530,6 +580,9 @@ const getProjectTasks = async (req, res) => {
                     ), '[]'::jsonb) AS description_attachments,
                     t.status,
                     t.priority,
+                    t.assignee_firebase_uid,
+                    assignee.full_name AS assignee_name,
+                    assignee.profile_image AS assignee_profile_image,
                     COALESCE(dependencies.items, '[]'::jsonb) AS dependencies,
                     COALESCE(dependencies.has_warning, FALSE) AS has_dependency_warning,
                     t.start_date,
@@ -539,6 +592,8 @@ const getProjectTasks = async (req, res) => {
                     t.updated_at
                 FROM project_tasks t
                 JOIN projects p ON p.project_id = t.project_id
+                LEFT JOIN user_profiles assignee
+                  ON assignee.firebase_uid = t.assignee_firebase_uid
                 LEFT JOIN messages context_message
                   ON context_message.message_id = t.chat_message_id
                  AND EXISTS (
@@ -586,6 +641,7 @@ const getProjectTasks = async (req, res) => {
                   AND (
                     $3::boolean = FALSE
                     OR p.creator_firebase_uid = $2
+                    OR t.assignee_firebase_uid = $2
                     OR EXISTS (
                         SELECT 1
                         FROM jsonb_array_elements(
@@ -657,6 +713,9 @@ const getProjectTaskDetails = async (req, res) => {
                             WITH ORDINALITY AS attachment(value, ordinality)
                     ), '[]'::jsonb) AS task_submission_attachments,
                     task.status, task.priority, task.start_date, task.due_date,
+                    task.assignee_firebase_uid,
+                    assignee.full_name AS assignee_name,
+                    assignee.profile_image AS assignee_profile_image,
                     task.chat_message_id::text AS chat_message_id,
                     message.conversation_id::text AS chat_conversation_id,
                     CASE WHEN $4::boolean THEN COALESCE((
@@ -671,6 +730,8 @@ const getProjectTaskDetails = async (req, res) => {
                     task.created_at, task.updated_at
              FROM project_tasks task
                          JOIN projects project ON project.project_id = task.project_id
+                         LEFT JOIN user_profiles assignee
+                             ON assignee.firebase_uid = task.assignee_firebase_uid
                          LEFT JOIN messages message
                              ON message.message_id = task.chat_message_id
                             AND EXISTS (
@@ -1336,6 +1397,13 @@ const createProjectTask = async (req, res) => {
                 message: timelineError
             });
         }
+        if (!(await validateProjectTaskAssignee(project.project_id, normalized.value.assigneeFirebaseUid))) {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_TASK_ASSIGNEE',
+                message: 'The assignee must be the project owner or an accepted project member.'
+            });
+        }
         const messageLinkError = await validateChatMessageLink(
             project.project_id,
             normalized.value.chatMessageId,
@@ -1355,9 +1423,9 @@ const createProjectTask = async (req, res) => {
                     task_id, project_id, title, description, category,
                     status, start_date, due_date,
                     created_by_firebase_uid, chat_message_id, description_attachments,
-                    priority, tags
+                    priority, tags, assignee_firebase_uid
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $11::jsonb, $12, $13::jsonb)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $11::jsonb, $12, $13::jsonb, $14)
                 RETURNING task_id
             `,
             [
@@ -1373,7 +1441,8 @@ const createProjectTask = async (req, res) => {
                 normalized.value.chatMessageId,
                 JSON.stringify(normalized.value.descriptionAttachments),
                 normalized.value.priority,
-                JSON.stringify(normalized.value.tags)
+                JSON.stringify(normalized.value.tags),
+                normalized.value.assigneeFirebaseUid
             ]
         );
 
@@ -1423,6 +1492,13 @@ const updateProjectTask = async (req, res) => {
                 success: false,
                 code: 'TASK_OUTSIDE_PROJECT_TIMELINE',
                 message: timelineError
+            });
+        }
+        if (!(await validateProjectTaskAssignee(project.project_id, normalized.value.assigneeFirebaseUid))) {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_TASK_ASSIGNEE',
+                message: 'The assignee must be the project owner or an accepted project member.'
             });
         }
         const messageLinkError = await validateChatMessageLink(
@@ -1482,9 +1558,10 @@ const updateProjectTask = async (req, res) => {
                     chat_message_id = $8::uuid,
                     description_attachments = $9::jsonb,
                     tags = CASE WHEN $10::boolean THEN $11::jsonb ELSE tags END,
+                    assignee_firebase_uid = CASE WHEN $12::boolean THEN $13 ELSE assignee_firebase_uid END,
                     updated_at = NOW()
-                WHERE project_id = $12
-                  AND task_id = $13::uuid
+                WHERE project_id = $14
+                  AND task_id = $15::uuid
                   AND (
                     $4 <> 'Done'
                     OR project_tasks.task_submission_status = 'Completed'
@@ -1503,6 +1580,8 @@ const updateProjectTask = async (req, res) => {
                 JSON.stringify(normalized.value.descriptionAttachments),
                 normalized.value.tagsProvided,
                 JSON.stringify(normalized.value.tags),
+                normalized.value.assigneeProvided,
+                normalized.value.assigneeFirebaseUid,
                 project.project_id,
                 req.params.taskId
             ]

@@ -24,6 +24,7 @@ export interface ProjectOverviewProps {
   onOpenProgressAside: (taskId: string | number) => void;
   onToggleTaskDone: (taskId: string | number) => void;
   onAddTask?: (projectId: string, title: string) => void;
+  onCreateSprint?: (projectId: string) => void;
 }
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -74,7 +75,8 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
   canViewTaskMetrics,
   onOpenProgressAside,
   onToggleTaskDone,
-  onAddTask
+  onAddTask,
+  onCreateSprint
 }) => {
   const [taskFilter, setTaskFilter] = useState<'all' | 'pending'>('all');
   const [timeframe, setTimeframe] = useState<'Weekly' | 'Monthly'>('Weekly');
@@ -224,15 +226,15 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
         <div className={styles['main-col']}>
           {/* Task metric cards */}
           <div className={styles['metrics-section']}>
-            {onAddTask && (
+            {onCreateSprint && (
               <div className={styles['metrics-actions']}>
                 <button
                   type="button"
                   className={styles['create-task-button']}
-                  onClick={() => onAddTask(project.projectId, '')}
+                  onClick={() => onCreateSprint?.(project.projectId)}
                 >
                   <Plus size={14} strokeWidth={2.5} />
-                  Create Project Sprint
+                  Create Sprint
                 </button>
               </div>
             )}

@@ -260,6 +260,10 @@ export interface TaskItem {
   progress: number;
   sprint?: string;
   sprintMembers?: ProjectMember[];
+  assigneeFirebaseUid?: string | null;
+  assignee_firebase_uid?: string | null;
+  assigneeName?: string;
+  assigneeProfileImage?: string;
   submission_status?: string;
   taskSubmissionStatus?: string;
   taskSubmissionNote?: string;

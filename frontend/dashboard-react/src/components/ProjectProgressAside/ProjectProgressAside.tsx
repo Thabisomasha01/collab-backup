@@ -28,7 +28,12 @@ function getTaskDueDateKey(task?: Partial<TaskItem> | null): string {
 }
 
 function getSprintDueDateKey(sprint?: Partial<ProjectSprint> | null): string {
-  const raw = sprint?.due_date || sprint?.dueDate || '';
+  const raw =
+    sprint?.due_date ||
+    sprint?.dueDate ||
+    sprint?.endDate ||
+    sprint?.end_date ||
+    '';
   return typeof raw === 'string' ? raw.slice(0, 10) : '';
 }
 
@@ -101,6 +106,14 @@ function getTaskStatusBadgeClass(status: string): string {
   return 'is-todo';
 }
 
+function getSprintTaskStatus(sprint: ProjectSprint): string {
+  const status = String(sprint.status || '').toLowerCase();
+  if (['completed', 'complete', 'done'].includes(status)) return 'Done';
+  if (['active', 'in progress'].includes(status)) return 'In progress';
+  if (status === 'blocked') return 'Blocked';
+  return 'Backlog';
+}
+
 export const ProjectProgressAside: React.FC = () => {
   const {
     asideTaskId,
@@ -147,6 +160,10 @@ export const ProjectProgressAside: React.FC = () => {
   );
 
   const [freshTaskMeta, setFreshTaskMeta] = useState<Partial<TaskItem> | null>(null);
+  const [fetchedSprintData, setFetchedSprintData] = useState<{
+    projectId: string;
+    sprints: ProjectSprint[];
+  } | null>(null);
   const [comments, setComments] = useState<TaskComment[]>([]);
   const [commentsExpanded, setCommentsExpanded] = useState(false);
   const [unreadComments, setUnreadComments] = useState(0);
@@ -171,6 +188,56 @@ export const ProjectProgressAside: React.FC = () => {
       (t) => t.projectId === project.projectId || t.project === project.name
     );
   }, [accessibleTasks, project]);
+  const sprintList =
+    fetchedSprintData?.projectId === project?.projectId
+      ? fetchedSprintData.sprints
+      : project?.sprints ?? [];
+
+  useEffect(() => {
+    if (!project?.projectId) {
+      setFetchedSprintData(null);
+      return;
+    }
+
+    let cancelled = false;
+    setFetchedSprintData(null);
+    api
+      .get('/projects')
+      .then((response) => {
+        const projects = response?.data?.projects;
+        if (!Array.isArray(projects)) {
+          throw new Error('The server returned an invalid projects response.');
+        }
+        const fetchedProject = projects.find(
+          (item: Record<string, unknown>) =>
+            String(item.project_id || item.projectId || item.id || '') === project.projectId
+        );
+        if (!fetchedProject) {
+          throw new Error('The selected project could not be found.');
+        }
+        const sprints = fetchedProject.sprints;
+        if (!Array.isArray(sprints)) {
+          throw new Error('The server returned an invalid project sprints response.');
+        }
+        if (!cancelled) {
+          setFetchedSprintData({ projectId: project.projectId, sprints });
+        }
+      })
+      .catch((error: unknown) => {
+        console.error('Unable to fetch project sprints for the progress aside:', error);
+        if (!cancelled) {
+          setFetchedSprintData(null);
+          showDashboardToast(
+            error instanceof Error ? error.message : 'Project sprints could not be loaded.',
+            'error'
+          );
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.projectId, project?.sprints, showDashboardToast]);
 
   const effectiveTask = useMemo<TaskItem | null>(() => {
     if (!selectedTask) return null;
@@ -478,7 +545,7 @@ export const ProjectProgressAside: React.FC = () => {
     if (!confirmed) return;
     setBusyKey(`sprint-remove:${sprint.name}`);
     try {
-      const remaining = (project.sprints || [])
+      const remaining = sprintList
         .filter((s) => s.name !== sprint.name)
         .map((s, idx) => {
           const stripped = String(s.name || '').replace(/^Sprint\s+\d+\s*:\s*/i, '');
@@ -512,8 +579,7 @@ export const ProjectProgressAside: React.FC = () => {
     };
     const completionPct = totalTasks ? Math.round((counts.done / totalTasks) * 100) : 0;
 
-    const sprints = project?.sprints || [];
-    const sprintStats = sprints.map((sp) => {
+    const sprintStats = sprintList.map((sp) => {
       const sTasks = projectTasks.filter((t) => t.sprint === sp.name);
       const sDone = sTasks.filter((t) => t.status === 'Done').length;
       const sPct = sTasks.length ? Math.round((sDone / sTasks.length) * 100) : 0;
@@ -573,7 +639,7 @@ export const ProjectProgressAside: React.FC = () => {
       sprintStatusCounts,
       recommendation
     };
-  }, [project?.sprints, projectTasks]);
+  }, [sprintList, projectTasks]);
 
   const handlePrintReport = () => {
     if (!project || !printIframeRef.current) return;
@@ -663,7 +729,6 @@ export const ProjectProgressAside: React.FC = () => {
   ];
 
   let taskDashOffset = 0;
-  const sprintList = project.sprints || [];
   const allSprintsExpanded =
     sprintList.length > 0 && sprintList.every((s) => expandedSprintNames.has(s.name));
 
@@ -1527,16 +1592,90 @@ export const ProjectProgressAside: React.FC = () => {
                     <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
                   </svg>
                 </span>
-                <h3>Project Tasks</h3>
+                <h3>Project Tasks &amp; Sprints</h3>
               </div>
-              <span className={cx('project-progress-aside-count')}>{projectTasks.length}</span>
-            </div>
+                <span className={cx('project-progress-aside-count')}>
+                  {projectTasks.length + sprintList.length}
+                </span>
+              </div>
 
-            {projectTasks.length === 0 ? (
-              <p className={cx('project-progress-aside-empty')}>No tasks on this board yet.</p>
-            ) : (
-              <div className={cx('project-progress-aside-tasks')}>
-                {projectTasks.map((t) => {
+              {projectTasks.length === 0 && sprintList.length === 0 ? (
+                <p className={cx('project-progress-aside-empty')}>
+                  No tasks or sprints on this board yet.
+                </p>
+              ) : (
+                <div className={cx('project-progress-aside-tasks')}>
+                  {sprintList.map((sprint) => {
+                    const sprintKey = `sprint:${sprint.id || sprint.sprintId || sprint.name}`;
+                    const expanded = expandedTaskIds.has(sprintKey);
+                    const status = getSprintTaskStatus(sprint);
+                    const attachments = Array.isArray(sprint.attachments)
+                      ? (sprint.attachments as MediaAttachment[])
+                      : [];
+                    const startDate =
+                      typeof sprint.startDate === 'string'
+                        ? sprint.startDate
+                        : typeof sprint.start_date === 'string'
+                          ? sprint.start_date
+                          : '';
+
+                    return (
+                      <div
+                        key={sprintKey}
+                        className={cx(
+                          'project-progress-aside-task',
+                          expanded && 'is-expanded'
+                        )}
+                      >
+                        <button
+                          type="button"
+                          className={cx('project-progress-aside-task-toggle')}
+                          aria-expanded={expanded}
+                          onClick={() => {
+                            setExpandedTaskIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(sprintKey)) next.delete(sprintKey);
+                              else next.add(sprintKey);
+                              return next;
+                            });
+                          }}
+                        >
+                          <div className={cx('project-progress-aside-task-summary')}>
+                            <strong>{sprint.name}</strong>
+                            <span>
+                              Sprint
+                              {startDate ? ` • Starts ${formatDateShort(startDate)}` : ''}
+                              {' • Due '}
+                              {formatDateShort(getSprintDueDateKey(sprint))}
+                            </span>
+                          </div>
+                          <span
+                            className={cx(
+                              'project-progress-aside-task-status',
+                              getTaskStatusBadgeClass(status)
+                            )}
+                          >
+                            {sprint.status || status}
+                          </span>
+                        </button>
+
+                        {expanded && (
+                          <div className={cx('project-progress-aside-task-details')}>
+                            {sprint.description && (
+                              <p className={cx('project-progress-aside-task-description')}>
+                                {sprint.description}
+                              </p>
+                            )}
+                            {attachments.length > 0 && (
+                              <TaskMediaPlayers attachments={attachments} />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {projectTasks.map((t) => {
                   const tid = String(t.taskId || t.id);
                   const expanded = expandedTaskIds.has(tid) || tid === taskIdStr;
                   const subStatus = String(

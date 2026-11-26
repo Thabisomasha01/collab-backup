@@ -22,9 +22,43 @@ type OverviewTask = TaskItem & { assignees: ProjectMember[] };
 function getOverviewTask(task: TaskItem, project: Project): OverviewTask {
   const sprint = project.sprints.find((item) => item.name === task.sprint);
   const sprintMembers = sprint ? getSprintMembers(project, sprint) : [];
+  const projectMembers: ProjectMember[] = [
+    ...(project.creatorFirebaseUid
+      ? [
+          {
+            firebaseUid: project.creatorFirebaseUid,
+            name: project.creatorName,
+            email: project.creatorEmail,
+            profileImage: project.creatorProfileImage
+          }
+        ]
+      : []),
+    ...project.acceptedMembers
+  ];
+  const projectAssignee = projectMembers.find(
+    (member) => (member.firebaseUid || member.firebase_uid) === task.assigneeFirebaseUid
+  );
+  const taskAssignee: ProjectMember[] = task.assigneeFirebaseUid
+    ? [
+        {
+          ...projectAssignee,
+          firebaseUid: task.assigneeFirebaseUid,
+          name: task.assigneeName || projectAssignee?.name || 'Project member',
+          profileImage:
+            task.assigneeProfileImage ||
+            projectAssignee?.profileImage ||
+            projectAssignee?.profile_image
+        }
+      ]
+    : [];
   return {
     ...task,
-    assignees: sprintMembers.length > 0 ? sprintMembers : task.sprintMembers || []
+    assignees:
+      taskAssignee.length > 0
+        ? taskAssignee
+        : sprintMembers.length > 0
+          ? sprintMembers
+          : task.sprintMembers || []
   };
 }
 
@@ -352,6 +386,12 @@ export const ProjectBoard: React.FC = () => {
           void moveTaskStatus(taskId, task.status === 'Done' ? 'To do' : 'Done');
         }
       }}
+      onCreateSprint={(projectId) =>
+        setActiveModal({
+          type: 'addSprint',
+          projectId
+        })
+      }
       onAddTask={(projectId, title) =>
         setActiveModal({
           type: 'createTask',

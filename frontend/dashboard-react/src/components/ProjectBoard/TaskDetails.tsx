@@ -154,11 +154,11 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
 
   const assignees: ProjectMember[] = useMemo(() => {
     if (!task) return [];
-    if (Array.isArray(task.assignees) && task.assignees.length > 0) {
+    if (Array.isArray(task.assignees)) {
       return task.assignees;
     }
-    return project?.acceptedMembers || [];
-  }, [task, project]);
+    return [];
+  }, [task]);
 
   const ownerPerson: ProjectMember = useMemo(() => {
     if (task?.owner) return task.owner;

@@ -255,6 +255,10 @@ export function normalizeTaskRecord(task: any, project: Project): TaskItem {
     progress: status === 'Done' ? 100 : status === 'In progress' ? 50 : 0,
     sprint: task.sprint || '',
     sprintMembers,
+    assigneeFirebaseUid: task.assignee_firebase_uid || task.assigneeFirebaseUid || null,
+    assignee_firebase_uid: task.assignee_firebase_uid || task.assigneeFirebaseUid || null,
+    assigneeName: task.assignee_name || task.assigneeName || '',
+    assigneeProfileImage: task.assignee_profile_image || task.assigneeProfileImage || '',
     taskSubmissionStatus: task.task_submission_status || task.taskSubmissionStatus || 'Not submitted',
     taskSubmissionNote: task.task_submission_note || task.taskSubmissionNote || '',
     taskSubmissionLinks: Array.isArray(task.task_submission_links)
