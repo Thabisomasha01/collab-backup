@@ -751,6 +751,36 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
                 </button>
               )}
 
+              <button
+                type="button"
+                className={`${styles['header-outline-btn']} ${styles['add-task-action']}`}
+                onClick={() =>
+                  window.dispatchEvent(new CustomEvent('collab-open-project-sticky-note'))
+                }
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="1em"
+                  height="1em"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <title>sticky-notes-sharp</title>
+                  <g
+                    fill="none"
+                    stroke="currentColor"
+                    strokeLinecap="square"
+                    strokeMiterlimit="2"
+                    strokeWidth="1.5"
+                  >
+                    <path d="M16.25 7.75h5v13.5H7.75v-5" />
+                    <path d="M4.75 2.75h11.5v9l-4.5 4.5h-9V2.75z" />
+                    <path d="M11.75 16.25v-4.5h4.5ZM6.25 7h6.5m-6.5 3.25h4" />
+                  </g>
+                </svg>
+                Add Sticky Note
+              </button>
+
               {activeTab === 'files' && (
                 <button
                   type="button"

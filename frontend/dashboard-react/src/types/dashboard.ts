@@ -447,6 +447,7 @@ export interface ProjectStickyNote {
   zIndex?: number;
   sharedWith?: ProjectMember[];
   shared_with?: ProjectMember[];
+  recipients?: Array<{ firebaseUid: string; name?: string; profileImage?: string }>;
   isOwner?: boolean;
   is_owner?: boolean;
   hidden?: boolean;

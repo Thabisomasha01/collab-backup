@@ -232,7 +232,7 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
                   onClick={() => onAddTask(project.projectId, '')}
                 >
                   <Plus size={14} strokeWidth={2.5} />
-                  Create Task
+                  Create Project Sprint
                 </button>
               </div>
             )}
