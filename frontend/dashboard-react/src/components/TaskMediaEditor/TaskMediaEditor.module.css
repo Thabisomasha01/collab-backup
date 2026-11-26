@@ -179,6 +179,7 @@
 :global(.project-task-editor-modal) .task-media-picker {
 
     justify-content: center;
+    flex-wrap: nowrap;
     gap: 0;
 
 }
@@ -186,27 +187,30 @@
 :global(.project-task-editor-modal) .task-media-action {
 
     justify-content: center;
-    min-height: 36px;
-    padding: 6px 9px;
+    min-width: 0;
+    min-height: 30px;
+    gap: 4px;
+    padding: 4px 5px;
     border: 0;
     border-radius: 0;
     background: transparent;
-    font-size: 12px;
+    font-size: 10px;
+    white-space: nowrap;
     transition: color 160ms ease, transform 160ms ease;
 
 }
 
 :global(.project-task-editor-modal) .task-media-action-icon svg {
 
-    width: 27px;
-    height: 27px;
+    width: 18px;
+    height: 18px;
 
 }
 
 :global(.project-task-editor-modal) .task-media-action + .task-media-action::before {
 
     content: '|';
-    margin-right: 9px;
+    margin-right: 5px;
     color: var(--muted);
     font-weight: 400;
 

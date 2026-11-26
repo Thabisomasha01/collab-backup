@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   getUserInitials,
   normalizeResourceRecord,
@@ -9,7 +9,6 @@ import { firebaseAuth } from '../../services/firebase';
 import type {
   MediaAttachment,
   Project,
-  ProjectSprint,
   TaskItem,
   TaskPriority,
   TaskStatus
@@ -17,8 +16,6 @@ import type {
 import { createCx } from '../../utils/cx';
 import {
   addDaysToDateKey,
-  formatRelativeDate,
-  getDateDayOffset,
   getEarliestDateTimeInput,
   normalizeDateKey,
   notBeforeTodayDateKey,
@@ -258,7 +255,8 @@ const INVITATION_ROLE_GROUPS = [
   }
 ];
 
-const TASK_TAG_OPTIONS = [
+const TASK_TAG_OPTIONS = [...new Set([
+  // General and delivery
   'Design',
   'Development',
   'Marketing',
@@ -278,8 +276,185 @@ const TASK_TAG_OPTIONS = [
   'Analytics',
   'Testing',
   'Planning',
-  'Content'
-];
+  'Content',
+  'Accessibility',
+  'Agile',
+  'Automation',
+  'Customer Feedback',
+  'Customer Support',
+  'Internal',
+  'Maintenance',
+  'Release',
+  'Roadmap',
+  'Stakeholder Review',
+  'Training',
+  'Operations',
+  'Strategy',
+  'Compliance',
+  'Risk',
+  'Documentation Update',
+  'Process Improvement',
+  'Incident',
+  'Technical Debt',
+  // Technology
+  'API',
+  'Architecture',
+  'Authentication',
+  'Authorization',
+  'Backend',
+  'Build',
+  'CI/CD',
+  'Cloud',
+  'Code Review',
+  'Database',
+  'Data Engineering',
+  'Data Science',
+  'Deployment',
+  'DevOps',
+  'Frontend',
+  'Full Stack',
+  'Infrastructure',
+  'Integration',
+  'iOS',
+  'Android',
+  'JavaScript',
+  'TypeScript',
+  'Python',
+  'Java',
+  'Go',
+  '.NET',
+  'React',
+  'Node.js',
+  'Microservices',
+  'Networking',
+  'Observability',
+  'Performance',
+  'Platform',
+  'Reliability',
+  'Scalability',
+  'Security',
+  'SEO',
+  'Software',
+  'Technical Writing',
+  'UI/UX',
+  'Usability',
+  'Web',
+  'Mobile',
+  'Machine Learning',
+  'AI',
+  'Analytics',
+  'Business Intelligence',
+  'Big Data',
+  'ETL',
+  'Data Governance',
+  'Data Quality',
+  'Experimentation',
+  'Quality Assurance',
+  'Regression Testing',
+  'Unit Testing',
+  'End-to-End Testing',
+  'Research and Development',
+  // Finance and accounting
+  'Accounting',
+  'Accounts Payable',
+  'Accounts Receivable',
+  'Audit',
+  'Banking',
+  'Billing',
+  'Bookkeeping',
+  'Budget',
+  'Budgeting',
+  'Capital',
+  'Cash Flow',
+  'Collections',
+  'Corporate Finance',
+  'Cost Management',
+  'Credit',
+  'Expense Management',
+  'Financial Analysis',
+  'Financial Modeling',
+  'Financial Planning',
+  'Financial Reporting',
+  'Forecasting',
+  'Fraud Prevention',
+  'Fundraising',
+  'Insurance',
+  'Investment',
+  'Investor Relations',
+  'Invoicing',
+  'Payroll',
+  'Procurement',
+  'Profitability',
+  'Reconciliation',
+  'Revenue',
+  'Tax',
+  'Treasury',
+  'Valuation',
+  'Venture Capital',
+  // Corporate and business
+  'Administration',
+  'B2B',
+  'B2C',
+  'Business Analysis',
+  'Business Development',
+  'Change Management',
+  'Communications',
+  'Contract Management',
+  'Corporate',
+  'Corporate Development',
+  'Corporate Governance',
+  'Customer Experience',
+  'Customer Success',
+  'Diversity and Inclusion',
+  'Employee Experience',
+  'Employee Relations',
+  'Facilities',
+  'Human Resources',
+  'Learning and Development',
+  'Legal',
+  'Logistics',
+  'Management',
+  'Mergers and Acquisitions',
+  'Office Management',
+  'Partnerships',
+  'People Operations',
+  'Policy',
+  'Product Operations',
+  'Project Management',
+  'Public Relations',
+  'Regulatory',
+  'Sales',
+  'Sales Operations',
+  'Vendor Management',
+  // Marketing and communications
+  'Advertising',
+  'Brand',
+  'Brand Awareness',
+  'Campaign',
+  'Communications Strategy',
+  'Copywriting',
+  'Digital Marketing',
+  'Email Marketing',
+  'Events',
+  'Lead Generation',
+  'Market Research',
+  'Media',
+  'Positioning',
+  'Social Media',
+  'Thought Leadership',
+  'Video',
+  'Content Strategy',
+  'Customer Research',
+  'Product Marketing',
+  'Publicity'
+])];
+
+const normalizeTaskTagSearch = (value: string) =>
+  value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
 
 function formatDurationInMonths(weeks: number): string {
   if (weeks < 4) return 'Less than 1 Month';
@@ -1667,7 +1842,6 @@ const TaskEditorModal: React.FC<{
     activeProject,
     currentUser,
     closeModal,
-    loadProjectsFromAPI,
     loadAllProjectTasks,
     addAuditLog,
     showDashboardToast
@@ -1747,7 +1921,7 @@ const TaskEditorModal: React.FC<{
     return ['Product'];
   });
   const [tagSearch, setTagSearch] = useState('');
-  const [sprintName, setSprintName] = useState(editingTask?.sprint || '');
+  const tagPickerRef = useRef<HTMLDetailsElement>(null);
   const [startDate, setStartDate] = useState(() =>
     clampDate(editingTask?.startDate || editingTask?.start_date || todayKey)
   );
@@ -1756,55 +1930,22 @@ const TaskEditorModal: React.FC<{
     () => editingTask?.descriptionAttachments || prefill?.attachments || []
   );
 
-  // Inline create sprint panel
-  const [sprintPanelOpen, setSprintPanelOpen] = useState(false);
-  const [newSprintName, setNewSprintName] = useState('');
-  const [newSprintDesc, setNewSprintDesc] = useState('');
-  const [newSprintDue, setNewSprintDue] = useState(() => clampDate(todayKey));
-  const [savingSprint, setSavingSprint] = useState(false);
-
   const [submitting, setSubmitting] = useState(false);
 
-  const projectSprints: ProjectSprint[] = targetProject?.sprints || [];
-
   const filteredTags = useMemo(() => {
-    const q = tagSearch.trim().toLowerCase();
-    return q ? TASK_TAG_OPTIONS.filter((t) => t.toLowerCase().includes(q)) : TASK_TAG_OPTIONS;
+    const query = normalizeTaskTagSearch(tagSearch);
+    if (!query) return TASK_TAG_OPTIONS;
+    const terms = query.split(/\s+/);
+    const compactQuery = query.replace(/[\s\W_]+/g, '');
+    return TASK_TAG_OPTIONS.filter((tag) => {
+      const normalizedTag = normalizeTaskTagSearch(tag);
+      const compactTag = normalizedTag.replace(/[\s\W_]+/g, '');
+      return (
+        compactTag.includes(compactQuery) ||
+        terms.every((term) => normalizedTag.includes(term))
+      );
+    });
   }, [tagSearch]);
-
-  const handleSaveInlineSprint = async () => {
-    if (!targetProject || !newSprintName.trim()) return;
-    setSavingSprint(true);
-    try {
-      const nextIndex = projectSprints.length + 1;
-      const cleanName = newSprintName.trim().replace(/^Sprint\s+\d+\s*:\s*/i, '');
-      const fullSprintName = `Sprint ${nextIndex}: ${cleanName}`;
-      const nextSprints: ProjectSprint[] = [
-        ...projectSprints,
-        {
-          id: `s_${Date.now()}`,
-          name: fullSprintName,
-          description: newSprintDesc.trim(),
-          status: 'Active',
-          dueDate: newSprintDue,
-          due_date: newSprintDue
-        }
-      ];
-      await api.put(`/projects/${encodeURIComponent(targetProject.projectId)}`, {
-        sprints: nextSprints
-      });
-      await loadProjectsFromAPI({ silent: true });
-      setSprintName(fullSprintName);
-      setNewSprintName('');
-      setNewSprintDesc('');
-      setSprintPanelOpen(false);
-      showDashboardToast(`Created "${fullSprintName}".`, 'success');
-    } catch (err: any) {
-      showDashboardToast(err?.message || 'Unable to save sprint.', 'error');
-    } finally {
-      setSavingSprint(false);
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1825,7 +1966,7 @@ const TaskEditorModal: React.FC<{
       category: primaryTag,
       tag: primaryTag,
       tags: selectedTags,
-      sprint: sprintName || null,
+      sprint: editingTask?.sprint || null,
       start_date: startDate,
       due_date: dueDate,
       description_attachments: attachments
@@ -1855,18 +1996,6 @@ const TaskEditorModal: React.FC<{
     }
   };
 
-  const tomorrowKey = addDaysToDateKey(todayKey, 1);
-  const todayObj = parseLocalDate(todayKey);
-  const thisWeekEnd = addDaysToDateKey(todayKey, 6 - todayObj.getDay());
-  const nextWeekStart = addDaysToDateKey(thisWeekEnd, 1);
-  const nextWeekEnd = addDaysToDateKey(nextWeekStart, 6);
-  const presets = [
-    { label: 'Today', start: todayKey, due: todayKey },
-    { label: 'Tomorrow', start: todayKey, due: tomorrowKey },
-    { label: 'This Week', start: todayKey, due: thisWeekEnd },
-    { label: 'Next Week', start: nextWeekStart, due: nextWeekEnd }
-  ];
-
   return (
     <div
       className="modal-backdrop"
@@ -1876,6 +2005,14 @@ const TaskEditorModal: React.FC<{
     >
       <form
         className="modal project-task-parent-form project-task-editor-modal"
+        onClick={(event) => {
+          if (
+            !(event.target instanceof Element) ||
+            !event.target.closest('.project-task-tag-picker')
+          ) {
+            tagPickerRef.current?.removeAttribute('open');
+          }
+        }}
         onSubmit={handleSubmit}
       >
         <div className="project-task-editor-header">
@@ -1885,7 +2022,7 @@ const TaskEditorModal: React.FC<{
             </span>
             <h2>{isEdit ? 'Edit Task Details' : 'Create Project Task'}</h2>
             <p className="modal-copy">
-              Set deliverables, schedule dates, sprint assignment, priority, and media context.
+              Set deliverables, schedule dates, and media context.
             </p>
           </div>
           <button type="button" className="close-modal" aria-label="Close" onClick={closeModal}>
@@ -1921,185 +2058,11 @@ const TaskEditorModal: React.FC<{
             />
           </label>
 
-          <div className="form-row project-task-tags-priority-row">
-            <div className="project-task-tag-field">
-              <span className="project-task-tag-label">Tags</span>
-              <details className="project-task-tag-picker">
-                <summary className="project-task-tag-picker-summary">
-                  {selectedTags.length ? selectedTags.join(', ') : 'Select tags'}
-                </summary>
-                <div className="project-task-tag-options">
-                  <input
-                    type="search"
-                    className="project-task-tag-search"
-                    value={tagSearch}
-                    onChange={(e) => setTagSearch(e.target.value)}
-                    placeholder="Filter tags…"
-                  />
-                  <div className="project-task-tag-option-list">
-                    {filteredTags.length === 0 ? (
-                      <div className="project-task-tag-empty">No matching tags</div>
-                    ) : (
-                      filteredTags.map((tag) => (
-                        <label key={tag} className="project-task-tag-option">
-                          <span>{tag}</span>
-                          <input
-                            type="checkbox"
-                            checked={selectedTags.includes(tag)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedTags((prev) => [...prev, tag]);
-                              } else {
-                                setSelectedTags((prev) => prev.filter((x) => x !== tag));
-                              }
-                            }}
-                          />
-                        </label>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </details>
-            </div>
-
-            <label>
-              Priority
-              <select
-                value={priority}
-                onChange={(e) => setPriority(e.target.value as TaskPriority)}
-              >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="urgent">Urgent</option>
-              </select>
-            </label>
-          </div>
-
-          <div className="form-row project-task-assignment-row">
-            <label>
-              Status
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as TaskStatus)}
-              >
-                <option value="To do">To do</option>
-                <option value="In progress">In progress</option>
-                <option value="Blocked">Blocked</option>
-                <option value="Done">Done</option>
-                <option value="Backlog">Backlog</option>
-              </select>
-            </label>
-
-            <div className="project-task-sprint-field" style={{ gridColumn: 'span 2' }}>
-              <label>
-                Sprint
-                <select value={sprintName} onChange={(e) => setSprintName(e.target.value)}>
-                  <option value="">No Sprint</option>
-                  {projectSprints.map((s) => (
-                    <option key={s.name} value={s.name}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <button
-              type="button"
-              className="outline-button project-task-create-sprint-toggle"
-              onClick={() => setSprintPanelOpen((p) => !p)}
-            >
-              {sprintPanelOpen ? 'Close' : '+ Sprint'}
-            </button>
-          </div>
-
-          {sprintPanelOpen && (
-            <div className="project-task-create-sprint-panel">
-              <div className="project-task-sprint-panel-header">
-                <h4>Quick Add Sprint</h4>
-                <button
-                  type="button"
-                  className="project-task-close-sprint"
-                  onClick={() => setSprintPanelOpen(false)}
-                >
-                  Cancel
-                </button>
-              </div>
-              <label>
-                Sprint Name
-                <input
-                  type="text"
-                  value={newSprintName}
-                  onChange={(e) => setNewSprintName(e.target.value)}
-                  placeholder="e.g. Design Signoff"
-                />
-              </label>
-              <label>
-                Description
-                <textarea
-                  rows={2}
-                  value={newSprintDesc}
-                  onChange={(e) => setNewSprintDesc(e.target.value)}
-                  placeholder="Sprint goals and scope…"
-                />
-              </label>
-              <div className="project-task-sprint-due-date-row">
-                <label>
-                  Due Date
-                  <input
-                    type="date"
-                    value={newSprintDue}
-                    min={minProjectDate}
-                    max={maxProjectDate || undefined}
-                    onChange={(e) => setNewSprintDue(e.target.value)}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="primary-button gold project-task-save-sprint"
-                  disabled={savingSprint || !newSprintName.trim()}
-                  onClick={handleSaveInlineSprint}
-                >
-                  {savingSprint ? 'Saving…' : 'Save Sprint'}
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* Schedule Calendar Picker */}
           <div className="cal-schedule-picker-card">
             <div className="cal-schedule-header">
               <div className="cal-schedule-title">
                 <span>🗓️ Due Date / Schedule Timeline</span>
-              </div>
-            </div>
-            <div className="cal-schedule-control-row">
-              <div className="cal-schedule-summary">
-                <strong>
-                  {formatRelativeDate(dueDate)} ({Math.max(1, getDateDayOffset(dueDate, parseLocalDate(startDate)) + 1)}d)
-                </strong>
-              </div>
-              <div className="cal-schedule-presets">
-                {presets.map((p) => {
-                  const ps = clampDate(p.start);
-                  let pd = clampDate(p.due);
-                  if (pd < ps) pd = ps;
-                  const active = ps === startDate && pd === dueDate;
-                  return (
-                    <button
-                      key={p.label}
-                      type="button"
-                      className={`cal-preset-pill ${active ? 'active' : ''}`}
-                      onClick={() => {
-                        setStartDate(ps);
-                        setDueDate(pd);
-                      }}
-                    >
-                      {p.label}
-                    </button>
-                  );
-                })}
               </div>
             </div>
             <DualDateRangeCalendars
@@ -2129,7 +2092,11 @@ const TaskEditorModal: React.FC<{
             label="Task Attachments & Recordings"
           />
 
-          <button type="submit" className="primary-button full gold" disabled={submitting}>
+          <button
+            type="submit"
+            className="primary-button full gold project-task-submit-button"
+            disabled={submitting}
+          >
             {submitting ? 'Saving Task…' : isEdit ? 'Save Task Changes' : 'Create Task'}
           </button>
         </div>
