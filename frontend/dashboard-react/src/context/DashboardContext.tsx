@@ -569,7 +569,7 @@ export interface DashboardContextValue {
   accessibleTasks: TaskItem[];
   setTasks: React.Dispatch<React.SetStateAction<TaskItem[]>>;
   loadAllProjectTasks: (projectList?: Project[]) => Promise<TaskItem[]>;
-  moveTaskStatus: (taskId: string | number, nextStatus: TaskStatus) => Promise<void>;
+  moveTaskStatus: (taskId: string | number, nextStatus: TaskStatus) => Promise<boolean>;
   deleteTask: (task: TaskItem) => Promise<void>;
 
   members: ProjectMember[];
@@ -1354,9 +1354,11 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const moveTaskStatus = useCallback(
     async (taskId: string | number, nextStatus: TaskStatus) => {
       const target = tasks.find((t) => String(t.id) === String(taskId));
-      if (!target || target.status === nextStatus) return;
+      if (!target) return false;
+      if (target.status === nextStatus) return true;
 
       const prevStatus = target.status;
+      const prevProgress = target.progress;
       setTasks((prev) =>
         prev.map((item) =>
           String(item.id) === String(taskId)
@@ -1388,14 +1390,17 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                 ? {
                     ...item,
                     status: prevStatus,
-                    done: prevStatus === 'Done'
+                    done: prevStatus === 'Done',
+                    progress: prevProgress
                   }
                 : item
             )
           );
           showDashboardToast(error?.message || 'Task status could not be updated.', 'error');
+          return false;
         }
       }
+      return true;
     },
     [tasks, addAuditLog, showDashboardToast]
   );

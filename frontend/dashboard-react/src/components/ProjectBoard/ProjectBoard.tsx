@@ -6,7 +6,7 @@ import {
   useDashboard
 } from '../../context/DashboardContext';
 import { api } from '../../services/api';
-import type { Project, ProjectMember, TaskItem } from '../../types/dashboard';
+import type { MediaAttachment, Project, ProjectMember, TaskItem } from '../../types/dashboard';
 import type {
   BoardCardItem,
   BoardColumnStatus,
@@ -73,6 +73,19 @@ function toBoardStatus(status?: string): BoardColumnStatus {
   return 'Pending';
 }
 
+function toTaskStatus(status: BoardColumnStatus): TaskItem['status'] {
+  if (status === 'In Progress') return 'In progress';
+  if (status === 'Pending') return 'Backlog';
+  if (status === 'Launched') return 'Done';
+  return status;
+}
+
+function getTaskStatusProgress(status: TaskItem['status']): number {
+  if (status === 'Done') return 100;
+  if (status === 'In progress') return 50;
+  return 0;
+}
+
 function toBoardPriority(priority?: string): TaskItem['priority'] {
   const normalized = String(priority || '').toLowerCase();
   if (
@@ -85,6 +98,14 @@ function toBoardPriority(priority?: string): TaskItem['priority'] {
     return normalized;
   }
   return 'medium';
+}
+
+function toApiMediaAttachment(attachment: MediaAttachment): MediaAttachment {
+  const { dataUrl, data_url, ...metadata } = attachment;
+  return {
+    ...metadata,
+    data: attachment.data || dataUrl || data_url || ''
+  };
 }
 
 function normalizeTaskComment(raw: Record<string, unknown>, idx: number): TaskComment {
@@ -295,6 +316,47 @@ export const ProjectBoard: React.FC = () => {
   const [retryCounter, setRetryCounter] = useState<number>(0);
   const [subtasksByTask, setSubtasksByTask] = useState<Record<string, TaskSubtask[]>>({});
 
+  const handleMoveBoardCard = useCallback(
+    async (taskId: string | number, boardStatus: BoardColumnStatus) => {
+      const nextStatus = toTaskStatus(boardStatus);
+      const sprintTask = sprintTasks.find((item) => String(item.id) === String(taskId));
+      const previousStatus = sprintTask?.status;
+
+      if (sprintTask) {
+        setSprintTasks((prev) =>
+          prev.map((item) =>
+            String(item.id) === String(taskId)
+              ? {
+                  ...item,
+                  status: nextStatus,
+                  done: nextStatus === 'Done',
+                  progress: getTaskStatusProgress(nextStatus)
+                }
+              : item
+          )
+        );
+      }
+
+      const saved = await moveTaskStatus(taskId, nextStatus);
+      if (!saved && sprintTask && previousStatus) {
+        setSprintTasks((prev) =>
+          prev.map((item) =>
+            String(item.id) === String(taskId) && item.status === nextStatus
+              ? {
+                  ...item,
+                  status: previousStatus,
+                  done: previousStatus === 'Done',
+                  progress: getTaskStatusProgress(previousStatus)
+                }
+              : item
+          )
+        );
+      }
+      return saved;
+    },
+    [moveTaskStatus, sprintTasks]
+  );
+
   useEffect(() => {
     if (selectedTaskViewId === null) return;
 
@@ -438,31 +500,197 @@ export const ProjectBoard: React.FC = () => {
   }, [fetchedTask, selectedTaskBase, selectedTaskProject, allTasks, tasks, subtasksByTask]);
 
   const handleAddComment = useCallback(
-    async (taskId: string | number, text: string) => {
-      if (!selectedTaskProject?.projectId) return;
+    async (
+      taskId: string | number,
+      text: string,
+      attachments: MediaAttachment[]
+    ): Promise<boolean> => {
+      if (!selectedTaskProject?.projectId) return false;
       const tid = String(selectedTaskBase?.taskId || selectedTaskBase?.task_id || taskId);
       try {
         const res = await api.post(
           `/projects/${encodeURIComponent(selectedTaskProject.projectId)}/tasks/${encodeURIComponent(tid)}/comments`,
-          { text, attachments: [] }
+          { text, attachments: attachments.map(toApiMediaAttachment) }
         );
         const created = res?.data?.comment;
-        if (created) {
-          setTaskComments((prev) => [...prev, normalizeTaskComment(created, prev.length)]);
-          setTasks((prev) =>
-            prev.map((item) =>
-              String(item.id) === String(taskId) || String(item.taskId || '') === tid
-                ? { ...item, comments: (item.comments || 0) + 1 }
-                : item
-            )
-          );
+        if (!created) {
+          throw new Error('The server did not confirm the comment.');
         }
+        setTaskComments((prev) => [...prev, normalizeTaskComment(created, prev.length)]);
+        setTasks((prev) =>
+          prev.map((item) =>
+            item.projectId === selectedTaskProject.projectId &&
+            (String(item.id) === String(taskId) || String(item.taskId || '') === tid)
+              ? { ...item, comments: (item.comments || 0) + 1 }
+              : item
+          )
+        );
+        return true;
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Unable to post comment.';
         showDashboardToast(message, 'error');
+        return false;
       }
     },
     [selectedTaskProject, selectedTaskBase, setTasks, showDashboardToast]
+  );
+
+  const handleSubmitTask = useCallback(
+    async (
+      taskId: string | number,
+      note: string,
+      links: string[],
+      attachments: MediaAttachment[]
+    ): Promise<boolean> => {
+      if (!selectedTaskProject?.projectId) return false;
+      const tid = String(selectedTaskBase?.taskId || selectedTaskBase?.task_id || taskId);
+      const attachmentPayload = attachments.map(toApiMediaAttachment);
+      try {
+        const response = await api.post(
+          `/projects/${encodeURIComponent(selectedTaskProject.projectId)}/tasks/${encodeURIComponent(tid)}/submit-for-review`,
+          {
+            submissionNote: note,
+            submissionLinks: links,
+            submissionAttachments: attachmentPayload
+          }
+        );
+        const savedTask = response?.data?.task;
+        if (response?.success !== true || !savedTask) {
+          throw new Error(response?.message || 'The server did not confirm the task submission.');
+        }
+
+        const submittedAt = savedTask.task_submitted_at || new Date().toISOString();
+        const submissionFields = {
+          taskSubmissionStatus: savedTask.task_submission_status || 'Pending Review',
+          task_submission_status: savedTask.task_submission_status || 'Pending Review',
+          taskSubmissionNote: savedTask.task_submission_note ?? note,
+          task_submission_note: savedTask.task_submission_note ?? note,
+          taskSubmissionLinks: savedTask.task_submission_links || links,
+          task_submission_links: savedTask.task_submission_links || links,
+          taskSubmissionAttachments: attachmentPayload,
+          task_submission_attachments: attachmentPayload,
+          taskSubmittedAt: submittedAt,
+          task_submitted_at: submittedAt
+        };
+        const source = fetchedTask || selectedTaskBase;
+        if (source) {
+          const normalized = normalizeTaskRecord(
+            {
+              ...source,
+              ...savedTask,
+              ...submissionFields,
+              task_id: tid,
+              taskId: tid,
+              task_submitted_by_firebase_uid:
+                savedTask.task_submitted_by_firebase_uid || firebaseUser?.uid
+            },
+            selectedTaskProject
+          );
+          setFetchedTask(getOverviewTask(normalized, selectedTaskProject));
+        }
+        setTasks((prev) =>
+          prev.map((item) =>
+            item.projectId === selectedTaskProject.projectId &&
+            (String(item.id) === tid || String(item.taskId || '') === tid)
+              ? { ...item, ...submissionFields }
+              : item
+          )
+        );
+        showDashboardToast(
+          response.notificationWarning || 'Task submitted for review.',
+          response.notificationWarning ? 'error' : 'success'
+        );
+        return true;
+      } catch (error: unknown) {
+        showDashboardToast(
+          error instanceof Error ? error.message : 'The task could not be submitted for review.',
+          'error'
+        );
+        return false;
+      }
+    },
+    [
+      selectedTaskProject,
+      selectedTaskBase,
+      fetchedTask,
+      firebaseUser?.uid,
+      setTasks,
+      showDashboardToast
+    ]
+  );
+
+  const handleReviewTask = useCallback(
+    async (
+      taskId: string | number,
+      decision: 'accept' | 'request_changes',
+      comment: string
+    ): Promise<boolean> => {
+      if (!selectedTaskProject?.projectId) return false;
+      const tid = String(selectedTaskBase?.taskId || selectedTaskBase?.task_id || taskId);
+      try {
+        const response = await api.post(
+          `/projects/${encodeURIComponent(selectedTaskProject.projectId)}/tasks/${encodeURIComponent(tid)}/review-submission`,
+          { decision, comment }
+        );
+        const reviewedTask = response?.data?.task;
+        if (response?.success !== true || !reviewedTask) {
+          throw new Error(response?.message || 'The server did not confirm the task review.');
+        }
+        const nextTaskStatus: TaskItem['status'] =
+          reviewedTask.status ||
+          (decision === 'accept' ? 'Done' : selectedTaskBase?.status || 'In progress');
+        const source = fetchedTask || selectedTaskBase;
+        if (source) {
+          const normalized = normalizeTaskRecord(
+            { ...source, ...reviewedTask, status: nextTaskStatus, task_id: tid, taskId: tid },
+            selectedTaskProject
+          );
+          setFetchedTask(getOverviewTask(normalized, selectedTaskProject));
+        }
+        const reviewFields = {
+          status: nextTaskStatus,
+          done: nextTaskStatus === 'Done',
+          progress: getTaskStatusProgress(nextTaskStatus),
+          taskSubmissionStatus:
+            reviewedTask.task_submission_status ||
+            (decision === 'accept' ? 'Completed' : 'Changes Requested'),
+          task_submission_status:
+            reviewedTask.task_submission_status ||
+            (decision === 'accept' ? 'Completed' : 'Changes Requested'),
+          taskReviewComment: reviewedTask.task_review_comment || '',
+          task_review_comment: reviewedTask.task_review_comment || '',
+          taskReviewedAt: reviewedTask.task_reviewed_at || null,
+          task_reviewed_at: reviewedTask.task_reviewed_at || null
+        };
+        setTasks((prev) =>
+          prev.map((item) =>
+            item.projectId === selectedTaskProject.projectId &&
+            (String(item.id) === tid || String(item.taskId || '') === tid)
+              ? { ...item, ...reviewFields }
+              : item
+          )
+        );
+        showDashboardToast(
+          response.notificationWarning ||
+            (decision === 'accept' ? 'Task submission accepted.' : 'Changes requested.'),
+          response.notificationWarning ? 'error' : 'success'
+        );
+        return true;
+      } catch (error: unknown) {
+        showDashboardToast(
+          error instanceof Error ? error.message : 'The task review could not be saved.',
+          'error'
+        );
+        return false;
+      }
+    },
+    [
+      selectedTaskProject,
+      selectedTaskBase,
+      fetchedTask,
+      setTasks,
+      showDashboardToast
+    ]
   );
 
   const handleToggleSubtask = useCallback(
@@ -536,10 +764,20 @@ export const ProjectBoard: React.FC = () => {
             error={taskError}
             onRetry={() => setRetryCounter((n) => n + 1)}
             asideMode
-            isProjectOwner={isCurrentUserProjectCreator}
+            isProjectOwner={
+              selectedTaskProject?.creatorFirebaseUid ===
+              (firebaseUser?.uid || currentUser.firebaseUid || currentUser.uid)
+            }
+            currentUserUid={
+              firebaseUser?.uid || currentUser.firebaseUid || currentUser.uid
+            }
+            currentUserEmail={firebaseUser?.email || currentUser.email}
+            onSubmitTask={handleSubmitTask}
+            onReviewTask={handleReviewTask}
             onOpenAnalysis={() => {
               if (activeViewerTask) openTaskDetails(activeViewerTask.id);
             }}
+            onMoveBoardCard={handleMoveBoardCard}
             onAddTask={() => {
               setActiveModal({
                 type: 'createTask',
@@ -562,9 +800,7 @@ export const ProjectBoard: React.FC = () => {
                   }
                 : undefined
             }
-            onAddComment={(taskId, text) => {
-              void handleAddComment(taskId, text);
-            }}
+            onAddComment={handleAddComment}
             onToggleSubtask={handleToggleSubtask}
             onUploadAttachment={handleUploadAttachment}
           />
@@ -645,6 +881,7 @@ export const ProjectBoard: React.FC = () => {
           isProjectOwner={true}
           onOpenAnalysis={() => openTaskDetails(sprintTask.id)}
           onOpenBoardTask={(taskId) => openFullTaskView(taskId, project.name, true)}
+          onMoveBoardCard={handleMoveBoardCard}
           currentUserUid={
             firebaseUser?.uid || currentUser.firebaseUid || currentUser.uid
           }

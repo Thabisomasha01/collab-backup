@@ -447,12 +447,12 @@
 }
 
 .aside-comment-form {
-  display: flex;
+  display: grid;
   gap: 8px;
   margin-top: 10px;
 }
 
-.aside-comment-form input {
+.aside-comment-form > input {
   min-width: 0;
   flex: 1;
   padding: 8px 10px;
@@ -462,7 +462,9 @@
   font-size: 11px;
 }
 
-.aside-comment-form button {
+.aside-comment-form > button {
+  justify-self: end;
+  min-height: 30px;
   padding: 0 11px;
   border: 0;
   border-radius: 7px;
@@ -470,6 +472,151 @@
   background: var(--blue-600);
   font-size: 10px;
   font-weight: 650;
+}
+
+.aside-comment-form > button:disabled,
+.aside-submit-button:disabled,
+.aside-review-actions button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.aside-submission-status {
+  margin-left: auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: var(--blue-700);
+  background: var(--blue-50);
+  font-size: 9px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.aside-submission-content,
+.aside-submission-form,
+.aside-review-form {
+  display: grid;
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.aside-submission-content .aside-description {
+  margin-top: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.aside-submission-links {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.aside-submission-links a {
+  color: var(--blue-700);
+}
+
+.aside-submission-files {
+  display: grid;
+  gap: 8px;
+}
+
+.aside-submission-file {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink-700);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.aside-submission-file > button {
+  justify-self: start;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--blue-700);
+  background: #ffffff;
+  font-size: 10px;
+}
+
+.aside-review-feedback {
+  padding: 9px;
+  border-radius: 8px;
+  color: var(--ink-700);
+  background: var(--surface-soft);
+  font-size: 10px;
+}
+
+.aside-review-feedback p {
+  margin: 5px 0 0;
+  white-space: pre-wrap;
+}
+
+.aside-submission-form textarea,
+.aside-review-form textarea {
+  width: 100%;
+  min-height: 64px;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink-900);
+  background: #ffffff;
+  font-size: 11px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.aside-form-label {
+  color: var(--ink-700);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.aside-form-error {
+  margin: 0;
+  color: var(--red-700);
+  font-size: 10px;
+}
+
+.aside-submit-button {
+  justify-self: start;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  color: #ffffff;
+  background: var(--blue-600);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.aside-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.aside-review-actions button {
+  min-height: 31px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink-700);
+  background: #ffffff;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.aside-review-actions button:last-child {
+  border-color: var(--blue-600);
+  color: #ffffff;
+  background: var(--blue-600);
 }
 
 .aside-activity {

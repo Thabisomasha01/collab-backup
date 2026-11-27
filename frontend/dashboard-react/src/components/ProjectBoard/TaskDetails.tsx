@@ -29,7 +29,10 @@ import type {
   TaskPriority,
   TaskSubtask
 } from '../../types/taskViewer';
+import type { MediaAttachment } from '../../types/dashboard';
 import { PersonAvatar } from './PersonAvatar';
+import { TaskMediaEditor, TaskMediaPlayers } from '../TaskMediaEditor';
+import { api } from '../../services/api';
 import styles from './TaskDetails.module.css';
 
 type TaskViewerTab = 'overview' | 'list' | 'board' | 'calendar' | 'files';
@@ -50,12 +53,31 @@ export interface TaskDetailsProps {
   isProjectOwner?: boolean;
   onOpenAnalysis?: () => void;
   onOpenBoardTask?: (taskId: string | number) => void;
+  onMoveBoardCard?: (
+    taskId: string | number,
+    status: BoardColumnStatus
+  ) => Promise<boolean>;
+  onSubmitTask?: (
+    taskId: string | number,
+    note: string,
+    links: string[],
+    attachments: MediaAttachment[]
+  ) => Promise<boolean>;
+  onReviewTask?: (
+    taskId: string | number,
+    decision: 'accept' | 'request_changes',
+    comment: string
+  ) => Promise<boolean>;
   currentUserUid?: string;
   currentUserEmail?: string;
   onAddTask?: () => void;
   onAssignTeamMember?: () => void;
   onToggleSubtask?: (taskId: string | number, subtaskId: string) => void;
-  onAddComment?: (taskId: string | number, text: string) => void;
+  onAddComment?: (
+    taskId: string | number,
+    text: string,
+    attachments: MediaAttachment[]
+  ) => Promise<boolean>;
   onUploadAttachment?: (taskId: string | number, files: TaskAttachment[]) => void;
 }
 
@@ -121,6 +143,9 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
   isProjectOwner = false,
   onOpenAnalysis,
   onOpenBoardTask,
+  onMoveBoardCard,
+  onSubmitTask,
+  onReviewTask,
   currentUserUid,
   currentUserEmail,
   onAddTask,
@@ -133,6 +158,23 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
   const [activeAsideTab, setActiveAsideTab] = useState<TaskAsideTab>('subtasks');
   const [showAllActivity, setShowAllActivity] = useState<boolean>(false);
   const [commentDraft, setCommentDraft] = useState<string>('');
+  const [commentAttachments, setCommentAttachments] = useState<MediaAttachment[]>([]);
+  const [commentBusy, setCommentBusy] = useState<boolean>(false);
+  const [commentError, setCommentError] = useState<string>('');
+  const [submissionNote, setSubmissionNote] = useState<string>('');
+  const [submissionLinksDraft, setSubmissionLinksDraft] = useState<string>('');
+  const [submissionAttachments, setSubmissionAttachments] = useState<MediaAttachment[]>([]);
+  const [submissionError, setSubmissionError] = useState<string>('');
+  const [submissionBusy, setSubmissionBusy] = useState<boolean>(false);
+  const [reviewComment, setReviewComment] = useState<string>('');
+  const [reviewError, setReviewError] = useState<string>('');
+  const [reviewBusy, setReviewBusy] = useState<boolean>(false);
+  const [loadedSubmissionAttachments, setLoadedSubmissionAttachments] = useState<
+    Record<number, MediaAttachment>
+  >({});
+  const [loadingSubmissionAttachment, setLoadingSubmissionAttachment] = useState<number | null>(
+    null
+  );
   const [shareCopied, setShareCopied] = useState<boolean>(false);
   const [, setEditingTitle] = useState<boolean>(false);
 
@@ -166,6 +208,16 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
     setAssigneeFilter('all');
     setPriorityFilter('all');
     setStatusFilter('all');
+  }, [task?.id]);
+
+  useEffect(() => {
+    setSubmissionNote(task?.taskSubmissionNote || '');
+    setSubmissionLinksDraft((task?.taskSubmissionLinks || []).join('\n'));
+    setSubmissionAttachments([]);
+    setSubmissionError('');
+    setReviewComment('');
+    setReviewError('');
+    setLoadedSubmissionAttachments({});
   }, [task?.id]);
 
   useEffect(() => {
@@ -369,6 +421,8 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
     const card = boardItems.find((item) => item.id === cardId);
     if (!card || !isAssignedToCurrentUser(card)) return;
 
+    const previousStatus = card.status;
+    const previousProgress = card.progress;
     setBoardItems((prev) =>
       prev.map((card) =>
         card.id === cardId
@@ -385,6 +439,19 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
           : card
       )
     );
+
+    if (onMoveBoardCard) {
+      void onMoveBoardCard(cardId, nextStatus).then((saved) => {
+        if (saved) return;
+        setBoardItems((prev) =>
+          prev.map((item) =>
+            item.id === cardId && item.status === nextStatus
+              ? { ...item, status: previousStatus, progress: previousProgress }
+              : item
+          )
+        );
+      });
+    }
   };
 
   const deleteBoardCard = (cardId: string) => {
@@ -413,12 +480,113 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
     setCreatingInColumn(null);
   };
 
-  const handleCommentSubmit = (event: React.FormEvent) => {
+  const handleCommentSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     const trimmed = commentDraft.trim();
-    if (!task || !trimmed) return;
-    onAddComment?.(task.id, trimmed);
-    setCommentDraft('');
+    if (!task || (!trimmed && commentAttachments.length === 0) || !onAddComment || commentBusy) return;
+    setCommentBusy(true);
+    setCommentError('');
+    try {
+      const saved = await onAddComment(task.id, trimmed, commentAttachments);
+      if (saved) {
+        setCommentDraft('');
+        setCommentAttachments([]);
+      } else {
+        setCommentError('The comment could not be posted. Please try again.');
+      }
+    } finally {
+      setCommentBusy(false);
+    }
+  };
+
+  const handleSubmitTask = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!task || !onSubmitTask || submissionBusy) return;
+    const note = submissionNote.trim();
+    const links = [
+      ...new Set(
+        submissionLinksDraft
+          .split(/\r?\n/)
+          .map((link) => link.trim())
+          .filter(Boolean)
+      )
+    ];
+    if (!note && !links.length && !submissionAttachments.length) {
+      setSubmissionError('Add a note, a link, or at least one attachment before submitting.');
+      return;
+    }
+    if (note.length > 5000 || links.length > 10) {
+      setSubmissionError(
+        note.length > 5000
+          ? 'Submission notes cannot exceed 5,000 characters.'
+          : 'Add no more than 10 links.'
+      );
+      return;
+    }
+    setSubmissionBusy(true);
+    setSubmissionError('');
+    try {
+      const saved = await onSubmitTask(task.id, note, links, submissionAttachments);
+      if (saved) {
+        setSubmissionAttachments([]);
+        setLoadedSubmissionAttachments({});
+        setSubmissionError('');
+      } else {
+        setSubmissionError('The task submission could not be saved. Please try again.');
+      }
+    } finally {
+      setSubmissionBusy(false);
+    }
+  };
+
+  const handleReviewTask = async (decision: 'accept' | 'request_changes') => {
+    if (!task || !onReviewTask || reviewBusy) return;
+    const comment = reviewComment.trim();
+    if (decision === 'request_changes' && !comment) {
+      setReviewError('Add feedback explaining the requested changes.');
+      return;
+    }
+    setReviewBusy(true);
+    setReviewError('');
+    try {
+      const saved = await onReviewTask(task.id, decision, comment);
+      if (saved) setReviewComment('');
+      else setReviewError('The task review could not be saved. Please try again.');
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  const handleLoadSubmissionAttachment = async (
+    attachment: MediaAttachment,
+    fallbackIndex: number
+  ) => {
+    if (!task?.projectId || !onSubmitTask) return;
+    const attachmentIndex = Number(
+      attachment.attachment_index ?? attachment.attachmentIndex ?? fallbackIndex
+    );
+    if (!Number.isInteger(attachmentIndex) || attachmentIndex < 0) return;
+    setLoadingSubmissionAttachment(attachmentIndex);
+    setSubmissionError('');
+    try {
+      const response = await api.get(
+        `/projects/${encodeURIComponent(task.projectId)}/tasks/${encodeURIComponent(String(task.taskId || task.task_id || task.id))}/submission-attachments/${attachmentIndex}`
+      );
+      const loaded = response?.data?.attachment;
+      if (!loaded || typeof loaded.data !== 'string') {
+        throw new Error('The task attachment could not be loaded.');
+      }
+      setLoadedSubmissionAttachments((previous) => ({
+        ...previous,
+        [attachmentIndex]: loaded
+      }));
+    } catch (error) {
+      setSubmissionError(
+        error instanceof Error ? error.message : 'The task attachment could not be loaded.'
+      );
+    } finally {
+      setLoadingSubmissionAttachment(null);
+    }
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -737,6 +905,26 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
       taskTags.push(task.priority);
     }
     const completedSubtasks = subtasks.filter((subtask) => subtask.done).length;
+    const submissionStatus = task.taskSubmissionStatus || 'Not submitted';
+    const currentUid = currentUserUid?.trim().toLowerCase();
+    const isCurrentUserTaskMember = Boolean(
+      currentUid &&
+        task.sprintMembers?.some((member) =>
+          [
+            member.firebaseUid,
+            member.firebase_uid,
+            member.uid,
+            member.userId
+          ].some((uid) => String(uid || '').trim().toLowerCase() === currentUid)
+        )
+    );
+    const canSubmitTask = Boolean(
+      onSubmitTask &&
+        (task.taskId || task.task_id) &&
+        (isProjectOwner || isCurrentUserTaskMember) &&
+        !['Pending Review', 'Completed'].includes(submissionStatus)
+    );
+    const savedSubmissionAttachments = task.taskSubmissionAttachments || [];
 
     return (
       <div className={`${taskViewerClassName} ${styles['task-aside']}`}>
@@ -903,6 +1091,169 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
           )}
         </section>
 
+        {Boolean(
+          (task.taskId || task.task_id) &&
+            (onSubmitTask || submissionStatus !== 'Not submitted')
+        ) && (
+          <section className={styles['aside-section']} aria-labelledby="aside-submission-heading">
+            <h3 id="aside-submission-heading" className={styles['aside-section-title']}>
+              Task submission
+              <span className={styles['aside-submission-status']}>{submissionStatus}</span>
+            </h3>
+            {submissionStatus !== 'Not submitted' && (
+              <div className={styles['aside-submission-content']}>
+                {task.taskSubmittedAt && (
+                  <small className={styles['aside-muted']}>
+                    Submitted {formatActivityTime(task.taskSubmittedAt)}
+                  </small>
+                )}
+                {task.taskSubmissionNote && (
+                  <p className={styles['aside-description']}>{task.taskSubmissionNote}</p>
+                )}
+                {task.taskSubmissionLinks && task.taskSubmissionLinks.length > 0 && (
+                  <ul className={styles['aside-submission-links']}>
+                    {task.taskSubmissionLinks.map((link, index) => (
+                      <li key={`${link}-${index}`}>
+                        <a href={link} target="_blank" rel="noopener noreferrer">
+                          {link}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {savedSubmissionAttachments.length > 0 && (
+                  <div className={styles['aside-submission-files']}>
+                    {savedSubmissionAttachments.map((attachment, index) => {
+                      const attachmentIndex = Number(
+                        attachment.attachment_index ?? attachment.attachmentIndex ?? index
+                      );
+                      const loaded = loadedSubmissionAttachments[attachmentIndex];
+                      return (
+                        <div
+                          key={attachment.id || attachment.fileName || attachment.name || index}
+                          className={styles['aside-submission-file']}
+                        >
+                          <span>{attachment.fileName || attachment.name || 'Submitted file'}</span>
+                          {!loaded && (
+                            <button
+                              type="button"
+                              disabled={loadingSubmissionAttachment === attachmentIndex}
+                              onClick={() =>
+                                void handleLoadSubmissionAttachment(attachment, index)
+                              }
+                            >
+                              {loadingSubmissionAttachment === attachmentIndex
+                                ? 'Loading…'
+                                : 'Open'}
+                            </button>
+                          )}
+                          {loaded && (
+                            <TaskMediaPlayers attachments={[loaded]} />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {task.taskReviewComment && (
+                  <div className={styles['aside-review-feedback']}>
+                    <strong>Review feedback</strong>
+                    <p>{task.taskReviewComment}</p>
+                  </div>
+                )}
+              </div>
+            )}
+            {submissionError && (
+              <p className={styles['aside-form-error']} role="alert">
+                {submissionError}
+              </p>
+            )}
+
+            {canSubmitTask && task.status === 'In progress' && (
+              <form className={styles['aside-submission-form']} onSubmit={handleSubmitTask}>
+                <label className={styles['aside-form-label']} htmlFor="task-submission-note">
+                  Submission note
+                </label>
+                <textarea
+                  id="task-submission-note"
+                  rows={3}
+                  maxLength={5000}
+                  value={submissionNote}
+                  onChange={(event) => setSubmissionNote(event.target.value)}
+                  placeholder="Describe the work completed..."
+                />
+                <label className={styles['aside-form-label']} htmlFor="task-submission-links">
+                  Share links (one per line)
+                </label>
+                <textarea
+                  id="task-submission-links"
+                  rows={2}
+                  value={submissionLinksDraft}
+                  onChange={(event) => setSubmissionLinksDraft(event.target.value)}
+                  placeholder="https://..."
+                />
+                <TaskMediaEditor
+                  label="Submission files"
+                  maxAttachments={10}
+                  attachments={submissionAttachments}
+                  onChange={setSubmissionAttachments}
+                />
+                <button
+                  type="submit"
+                  className={styles['aside-submit-button']}
+                  disabled={submissionBusy}
+                >
+                  {submissionBusy ? 'Submitting…' : 'Submit for review'}
+                </button>
+              </form>
+            )}
+            {canSubmitTask && task.status !== 'In progress' && (
+              <p className={styles['aside-muted']}>
+                Move the task to In Progress before submitting it for review.
+              </p>
+            )}
+
+            {isProjectOwner &&
+              submissionStatus === 'Pending Review' &&
+              onReviewTask && (
+                <div className={styles['aside-review-form']}>
+                  <label className={styles['aside-form-label']} htmlFor="task-review-comment">
+                    Review feedback
+                  </label>
+                  <textarea
+                    id="task-review-comment"
+                    rows={3}
+                    maxLength={5000}
+                    value={reviewComment}
+                    onChange={(event) => setReviewComment(event.target.value)}
+                    placeholder="Add feedback for the assignee..."
+                  />
+                  {reviewError && (
+                    <p className={styles['aside-form-error']} role="alert">
+                      {reviewError}
+                    </p>
+                  )}
+                  <div className={styles['aside-review-actions']}>
+                    <button
+                      type="button"
+                      disabled={reviewBusy}
+                      onClick={() => void handleReviewTask('request_changes')}
+                    >
+                      Request changes
+                    </button>
+                    <button
+                      type="button"
+                      disabled={reviewBusy}
+                      onClick={() => void handleReviewTask('accept')}
+                    >
+                      {reviewBusy ? 'Saving…' : 'Accept submission'}
+                    </button>
+                  </div>
+                </div>
+              )}
+          </section>
+        )}
+
         <div className={styles['aside-tabs-wrap']}>
           <div className={styles['aside-tabs']} role="tablist" aria-label="Task details">
             {([
@@ -996,6 +1347,9 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
                     >
                       <strong>{comment.authorName || comment.author || 'Teammate'}</strong>
                       <p>{comment.text || comment.body || ''}</p>
+                      {comment.attachments && (
+                        <TaskMediaPlayers attachments={comment.attachments} />
+                      )}
                       <small>{formatActivityTime(comment.createdAt || comment.created_at)}</small>
                     </article>
                   ))}
@@ -1008,11 +1362,25 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
                   <input
                     type="text"
                     aria-label="Add a comment"
+                    maxLength={5000}
                     placeholder="Add a comment..."
                     value={commentDraft}
                     onChange={(event) => setCommentDraft(event.target.value)}
                   />
-                  <button type="submit">Post</button>
+                  <button type="submit" disabled={commentBusy}>
+                    {commentBusy ? 'Posting…' : 'Post'}
+                  </button>
+                  <TaskMediaEditor
+                    label="Comment files"
+                    maxAttachments={10}
+                    attachments={commentAttachments}
+                    onChange={setCommentAttachments}
+                  />
+                  {commentError && (
+                    <p className={styles['aside-form-error']} role="alert">
+                      {commentError}
+                    </p>
+                  )}
                 </form>
               )}
             </section>
