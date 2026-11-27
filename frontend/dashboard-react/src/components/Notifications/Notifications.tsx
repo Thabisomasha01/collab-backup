@@ -28,7 +28,8 @@ export const Notifications: React.FC = () => {
     markNotificationRead,
     markAllNotificationsRead,
     clearAllNotifications,
-    openTaskDetails,
+    projects,
+    openFullTaskView,
     openBrainstormFromNotification,
     switchView,
     showDashboardConfirmation,
@@ -124,7 +125,10 @@ export const Notifications: React.FC = () => {
       markNotificationRead(notif.id).catch(() => {});
     }
     if (notif.relatedTaskId) {
-      openTaskDetails(notif.relatedTaskId);
+      const targetProject = projects.find(
+        (project) => project.projectId === notif.projectId
+      );
+      openFullTaskView(notif.relatedTaskId, targetProject?.name);
     }
   };
 
@@ -266,7 +270,7 @@ export const Notifications: React.FC = () => {
                               className="action-btn"
                               onClick={() => handleOpenTask(notif)}
                             >
-                              Open task
+                              {notif.type === 'task_assigned' ? 'Open task board' : 'Open task'}
                             </button>
                           ) : notif.unread ? (
                             <button

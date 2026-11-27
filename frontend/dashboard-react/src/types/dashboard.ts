@@ -360,6 +360,7 @@ export interface NotificationRecord {
   detail: string;
   boardId?: string | null;
   relatedTaskId?: string | null;
+  projectId?: string | null;
   avatar: string;
   toneClass: string;
   invitationId?: string | null;

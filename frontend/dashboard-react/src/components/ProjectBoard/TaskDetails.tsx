@@ -11,10 +11,8 @@ import {
   Kanban,
   List as ListIcon,
   MoreHorizontal,
-  Paperclip,
   Plus,
   SlidersHorizontal,
-  Tag,
   Trash2,
   UserCircle2,
   UserPlus,
@@ -52,6 +50,8 @@ export interface TaskDetailsProps {
   isProjectOwner?: boolean;
   onOpenAnalysis?: () => void;
   onOpenBoardTask?: (taskId: string | number) => void;
+  currentUserUid?: string;
+  currentUserEmail?: string;
   onAddTask?: () => void;
   onAssignTeamMember?: () => void;
   onToggleSubtask?: (taskId: string | number, subtaskId: string) => void;
@@ -92,6 +92,23 @@ function formatActivityTime(raw?: string | null): string {
   }).format(parsed);
 }
 
+function getAsideTagTone(tag: string) {
+  switch (tag.trim().toLowerCase()) {
+    case 'product':
+      return 'aside-tag-product';
+    case 'urgent':
+      return 'aside-tag-urgent';
+    case 'high':
+      return 'aside-tag-high';
+    case 'medium':
+      return 'aside-tag-medium';
+    case 'low':
+      return 'aside-tag-low';
+    default:
+      return 'aside-tag-default';
+  }
+}
+
 export const TaskDetails: React.FC<TaskDetailsProps> = ({
   task,
   project,
@@ -104,6 +121,8 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
   isProjectOwner = false,
   onOpenAnalysis,
   onOpenBoardTask,
+  currentUserUid,
+  currentUserEmail,
   onAddTask,
   onAssignTeamMember,
   onToggleSubtask,
@@ -316,20 +335,53 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
           urgent: 'Urgent'
         }[priorityFilter];
 
+  const isAssignedToCurrentUser = (card: BoardCardItem) => {
+    const currentUid = currentUserUid?.trim().toLowerCase();
+    const currentEmail = currentUserEmail?.trim().toLowerCase();
+    if (!currentUid && !currentEmail) return false;
+    if (card.assignedUserUids) {
+      return Boolean(
+        currentUid &&
+          card.assignedUserUids.some((uid) => uid.trim().toLowerCase() === currentUid)
+      );
+    }
+
+    return card.assignees.some((assignee) => {
+      const assigneeUid = (
+        assignee.firebaseUid ||
+        assignee.firebase_uid ||
+        assignee.uid ||
+        assignee.userId ||
+        ''
+      )
+        .trim()
+        .toLowerCase();
+      const assigneeEmail = (assignee.email || '').trim().toLowerCase();
+
+      return Boolean(
+        (currentUid && assigneeUid && currentUid === assigneeUid) ||
+        (currentEmail && assigneeEmail && currentEmail === assigneeEmail)
+      );
+    });
+  };
+
   const moveBoardCard = (cardId: string, nextStatus: BoardColumnStatus) => {
+    const card = boardItems.find((item) => item.id === cardId);
+    if (!card || !isAssignedToCurrentUser(card)) return;
+
     setBoardItems((prev) =>
       prev.map((card) =>
         card.id === cardId
           ? {
-            ...card,
-            status: nextStatus,
-            progress:
-              nextStatus === 'Done' || nextStatus === 'Launched'
-                ? 100
-                : nextStatus === 'In Progress'
-                  ? card.progress || 45
-                  : 0
-          }
+              ...card,
+              status: nextStatus,
+              progress:
+                nextStatus === 'Done' || nextStatus === 'Launched'
+                  ? 100
+                  : nextStatus === 'In Progress'
+                    ? card.progress || 45
+                    : 0
+            }
           : card
       )
     );
@@ -348,6 +400,9 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
       title,
       status: creatingInColumn,
       assignees: assignees.length ? [assignees[0]] : [],
+      assignedUserUids: assignees
+        .map((assignee) => assignee.firebaseUid || assignee.firebase_uid || assignee.uid || '')
+        .filter(Boolean),
       due: 'March 18 - 10:00AM',
       dueDateKey: '2026-03-18',
       priority: newCardPriority,
@@ -709,11 +764,9 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
           <dl className={styles['aside-metadata-grid']}>
             <div className={styles['aside-metadata-item']}>
               <dt>
-                <Circle size={13} />
                 Status
               </dt>
               <dd>
-                <span className={styles['aside-status-indicator']} aria-hidden="true" />
                 {task.status || 'To do'}
               </dd>
             </div>
@@ -730,7 +783,17 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
             </div>
             <div className={styles['aside-metadata-item']}>
               <dt>
-                <UserCircle2 size={13} />
+                <svg
+                  width="1em"
+                  height="1em"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    fill="currentColor"
+                    d="M7 7a5 5 0 1 1 10.001.001A5 5 0 0 1 7 7m11 15H6a1 1 0 0 1-1-1a6.9 6.9 0 0 1 .551-2.725A6.9 6.9 0 0 1 7.05 16.05A6.97 6.97 0 0 1 12 14c1.862 0 3.636.731 4.95 2.05a6.9 6.9 0 0 1 1.499 2.225c.366.862.554 1.789.551 2.725a1 1 0 0 1-1 1"
+                  />
+                </svg>
                 Assignee
               </dt>
               <dd className={styles['aside-assignees']}>
@@ -751,7 +814,17 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
             </div>
             <div className={styles['aside-metadata-item']}>
               <dt>
-                <Tag size={13} />
+                <svg
+                  width="1em"
+                  height="1em"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    fill="currentColor"
+                    d="M20 10V8h-4V4h-2v4h-4V4H8v4H4v2h4v4H4v2h4v4h2v-4h4v4h2v-4h4v-2h-4v-4zm-6 4h-4v-4h4z"
+                  />
+                </svg>
                 Tags
               </dt>
               <dd className={styles['aside-tags']}>
@@ -759,9 +832,7 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
                   taskTags.map((tag, index) => (
                     <span
                       key={`${tag}-${index}`}
-                      className={`${styles['aside-tag']} ${
-                        tag === task.priority ? styles['aside-priority-tag'] : ''
-                      }`}
+                      className={`${styles['aside-tag']} ${styles[getAsideTagTone(tag)]}`}
                     >
                       {tag}
                     </span>
@@ -787,7 +858,18 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
         <section className={styles['aside-section']} aria-labelledby="aside-attachments-heading">
           <div className={styles['aside-section-header']}>
             <h3 id="aside-attachments-heading" className={styles['aside-section-title']}>
-              <Paperclip size={13} />
+              <svg
+                width="1em"
+                height="1em"
+                viewBox="0 0 24 24"
+                role="img"
+                aria-label="Attachments"
+              >
+                <path
+                  fill="currentColor"
+                  d="M18 6h-6a2 2 0 0 0-2-2H6C4.346 4 3 5.346 3 7v10c0 1.654 1.346 3 3 3h12c1.654 0 3-1.346 3-3V9c0-1.654-1.346-3-3-3M6 6h4a2 2 0 0 0 2 2h6a1 1 0 0 1 1 1H5V7a1 1 0 0 1 1-1m12 12H6a1 1 0 0 1-1-1v-7h14v7a1 1 0 0 1-1 1"
+                />
+              </svg>
               Attachments ({attachments.length})
             </h3>
             <button
@@ -1560,6 +1642,7 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
                       filteredBoardItems.map((item) => {
                         const isCompleted =
                           item.status === 'Done' || item.status === 'Launched';
+                        const canMoveItem = isAssignedToCurrentUser(item);
                         const colCfg = BOARD_COLUMNS.find((c) => c.status === item.status);
 
                         return (
@@ -1568,8 +1651,16 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
                               <button
                                 type="button"
                                 className={`${styles['task-circle-btn']} ${isCompleted ? styles['is-done'] : ''
+                                  } ${!canMoveItem ? styles['is-disabled'] : ''
                                   }`}
                                 aria-label={`Toggle ${item.title}`}
+                                aria-disabled={!canMoveItem}
+                                title={
+                                  canMoveItem
+                                    ? `Toggle ${item.title}`
+                                    : 'Only the assigned user can move this task'
+                                }
+                                disabled={!canMoveItem}
                                 onClick={() =>
                                   moveBoardCard(item.id, isCompleted ? 'To do' : 'Done')
                                 }
@@ -1751,14 +1842,15 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
                           const circ = 2 * Math.PI * 7;
                           const dashOffset = circ * (1 - progress / 100);
                           const isMenuOpen = openCardMenuId === card.id;
+                          const canMoveCard = isAssignedToCurrentUser(card);
 
                           return (
                             <article
                               key={card.id}
-                              draggable
+                              draggable={canMoveCard}
                               role={onOpenBoardTask ? 'button' : undefined}
                               tabIndex={onOpenBoardTask ? 0 : undefined}
-                              className={`${styles['board-card']} ${onOpenBoardTask ? styles['is-clickable'] : ''} ${draggingCardId === card.id ? styles['is-dragging'] : ''
+                              className={`${styles['board-card']} ${onOpenBoardTask ? styles['is-clickable'] : ''} ${!canMoveCard ? styles['is-not-draggable'] : ''} ${draggingCardId === card.id ? styles['is-dragging'] : ''
                                 }`}
                               onClick={() => onOpenBoardTask?.(card.id)}
                               onKeyDown={(e) => {
@@ -1772,6 +1864,10 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
                                 }
                               }}
                               onDragStart={(e) => {
+                                if (!canMoveCard) {
+                                  e.preventDefault();
+                                  return;
+                                }
                                 e.dataTransfer.setData('text/plain', card.id);
                                 e.dataTransfer.effectAllowed = 'move';
                                 setDraggingCardId(card.id);
@@ -1840,6 +1936,12 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
                                           type="button"
                                           className={`${styles['card-action-option']} ${card.status === opt.status ? styles['is-current'] : ''
                                             }`}
+                                          disabled={!canMoveCard || card.status === opt.status}
+                                          title={
+                                            canMoveCard
+                                              ? undefined
+                                              : 'Only the assigned user can move this task'
+                                          }
                                           onClick={() => {
                                             moveBoardCard(card.id, opt.status);
                                             setOpenCardMenuId(null);

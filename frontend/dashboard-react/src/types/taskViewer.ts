@@ -38,6 +38,7 @@ export interface BoardCardItem {
   title: string;
   status: BoardColumnStatus;
   assignees: ProjectMember[];
+  assignedUserUids?: string[];
   due?: string;
   dueDateKey?: string;
   priority?: TaskPriority;

@@ -2059,7 +2059,7 @@ const AssignSprintTaskModal: React.FC<{ projectId: string; sprintId: string }> =
     if (!selectedTask) return;
     setSubmitting(true);
     try {
-      await api.patch(
+      const response = await api.patch(
         `/projects/${encodeURIComponent(projectId)}/sprints/${encodeURIComponent(sprintId)}/tasks/${encodeURIComponent(selectedTask.task_id)}/assignee`,
         { assigneeFirebaseUid: selectedMemberUid || null }
       );
@@ -2070,7 +2070,10 @@ const AssignSprintTaskModal: React.FC<{ projectId: string; sprintId: string }> =
         }.`,
         'checkCircle'
       );
-      showDashboardToast('Task assignment updated.', 'success');
+      showDashboardToast(
+        response?.notificationWarning || 'Task assignment updated.',
+        response?.notificationWarning ? 'warning' : 'success'
+      );
       closeModal();
       loadAllProjectTasks().catch((error: unknown) => {
         console.error('Task assignment was saved, but project tasks could not be refreshed:', error);

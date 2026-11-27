@@ -114,6 +114,8 @@ function normalizeTaskComment(raw: Record<string, unknown>, idx: number): TaskCo
 export const ProjectBoard: React.FC = () => {
   const {
     activeProject,
+    currentUser,
+    firebaseUser,
     isCurrentUserProjectCreator,
     projects,
     loadProjectSprints,
@@ -414,6 +416,11 @@ export const ProjectBoard: React.FC = () => {
         title: item.title,
         status: toBoardStatus(item.status),
         assignees: item.assignees || [],
+        assignedUserUids: item.assigneeFirebaseUid
+          ? [item.assigneeFirebaseUid]
+          : item.assignee_firebase_uid
+            ? [item.assignee_firebase_uid]
+            : [],
         due: item.due && item.due !== '—' ? item.due : undefined,
         dueDateKey: dueDateKey || undefined,
         priority: toBoardPriority(item.priority),
@@ -607,6 +614,11 @@ export const ProjectBoard: React.FC = () => {
         title: task.title,
         status: toBoardStatus(task.status),
         assignees: task.assignees || task.sprintMembers || [],
+        assignedUserUids: task.assigneeFirebaseUid
+          ? [task.assigneeFirebaseUid]
+          : task.assignee_firebase_uid
+            ? [task.assignee_firebase_uid]
+            : [],
         due: task.due === '—' ? undefined : task.due,
         dueDateKey: task.date || undefined,
         priority: toBoardPriority(task.priority)
@@ -633,6 +645,10 @@ export const ProjectBoard: React.FC = () => {
           isProjectOwner={true}
           onOpenAnalysis={() => openTaskDetails(sprintTask.id)}
           onOpenBoardTask={(taskId) => openFullTaskView(taskId, project.name, true)}
+          currentUserUid={
+            firebaseUser?.uid || currentUser.firebaseUid || currentUser.uid
+          }
+          currentUserEmail={firebaseUser?.email || currentUser.email}
           onAddTask={() => {
             setActiveModal({
               type: 'createTask',

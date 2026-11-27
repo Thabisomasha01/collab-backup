@@ -68,6 +68,8 @@
 
 .aside-metadata-item dt svg,
 .aside-section-title svg {
+  width: 19px;
+  height: 19px;
   flex: 0 0 auto;
   color: var(--ink-400);
 }
@@ -84,8 +86,8 @@
 }
 
 .aside-status-indicator {
-  width: 9px;
-  height: 9px;
+  width: 13px;
+  height: 13px;
   flex: 0 0 auto;
   border: 1.5px solid #6187e8;
   border-radius: 50%;
@@ -93,12 +95,9 @@
 
 .aside-tag {
   display: inline-flex;
-  min-height: 23px;
   align-items: center;
-  padding: 3px 9px;
-  border-radius: 999px;
-  color: #176f50;
-  background: #e7f6ee;
+  padding: 0;
+  border-radius: 0;
   font-size: 12px;
   font-weight: 650;
 }
@@ -125,13 +124,31 @@
 }
 
 .aside-tag {
-  color: #5146a5;
-  background: #f0edff;
+  color: #475569;
 }
 
-.aside-priority-tag {
-  color: #a3413b;
-  background: #fff0ed;
+.aside-tag-product {
+  color: #6d28d9;
+}
+
+.aside-tag-urgent,
+.aside-tag-high {
+  color: #c62828;
+}
+
+.aside-tag-medium {
+  color: #9a5b00;
+}
+
+.aside-tag-low {
+  color: #147047;
+}
+
+.aside-tag + .aside-tag::before {
+  margin: 0 8px 0 1px;
+  color: var(--ink-500);
+  font-weight: 400;
+  content: '|';
 }
 
 .aside-muted {
@@ -191,6 +208,11 @@
   background: var(--blue-50);
 }
 
+.aside-upload-button svg {
+  width: 19px;
+  height: 19px;
+}
+
 .aside-attachments {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -218,6 +240,11 @@
   border-radius: 5px;
   color: var(--red-700);
   background: var(--red-100);
+}
+
+.aside-attachment-icon svg {
+  width: 21px;
+  height: 21px;
 }
 
 .aside-attachment-info {
@@ -749,6 +776,18 @@
 
 .card-action-option.is-danger {
   color: var(--red-700);
+}
+
+.card-action-option:disabled {
+  color: var(--ink-400);
+  background: transparent;
+  cursor: not-allowed;
+}
+
+.task-circle-btn:disabled {
+  border-color: var(--line-strong);
+  background: var(--surface-muted);
+  cursor: not-allowed;
 }
 
 .task-tabs-row {
@@ -1682,6 +1721,10 @@
 }
 
 .board-card.is-clickable {
+  cursor: pointer;
+}
+
+.board-card.is-not-draggable {
   cursor: pointer;
 }
 

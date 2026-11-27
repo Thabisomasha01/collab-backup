@@ -21,6 +21,24 @@ const projectSprintMemberUids = project => [...new Set(
         .flatMap(sprintMemberUids)
 )];
 
+const notifyTaskAssignee = async ({ recipientUid, actorUid, project, taskId, taskTitle }) => {
+    if (!recipientUid || recipientUid === actorUid) return;
+    await query(
+        `INSERT INTO notifications (
+             recipient_firebase_uid, project_id, related_task_id,
+             type, title, detail, avatar, tone_class
+         )
+         VALUES ($1, $2, $3, 'task_assigned',
+                 'You were assigned a task', $4, '✓', 'blue-bg')`,
+        [
+            recipientUid,
+            project.project_id,
+            taskId,
+            `You were assigned "${taskTitle}" in ${project.name}.`
+        ]
+    );
+};
+
 const normalizeTaskSubmissionAttachments = value => {
     if (value === undefined) return { attachments: [], error: null };
     if (!Array.isArray(value) || value.length > MAX_TASK_SUBMISSION_ATTACHMENTS) {
@@ -1504,10 +1522,24 @@ const createProjectTask = async (req, res) => {
                 normalized.value.sprintId
             ]
         );
+        let notificationWarning = null;
+        try {
+            await notifyTaskAssignee({
+                recipientUid: normalized.value.assigneeFirebaseUid,
+                actorUid: req.firebaseUid,
+                project,
+                taskId: result.rows[0].task_id,
+                taskTitle: normalized.value.title
+            });
+        } catch (notificationError) {
+            console.error('Task was created, but its assignee could not be notified:', notificationError);
+            notificationWarning = 'The task was created, but its assignee could not be notified.';
+        }
 
         return res.status(201).json({
             success: true,
-            data: { taskId: result.rows[0].task_id }
+            data: { taskId: result.rows[0].task_id },
+            ...(notificationWarning ? { notificationWarning } : {})
         });
     } catch (error) {
         console.error('Create project task error:', error);
@@ -1584,7 +1616,7 @@ const updateProjectTask = async (req, res) => {
         }
 
         const previousTask = await query(
-            `SELECT due_date, status, title, task_submission_status FROM project_tasks
+            `SELECT due_date, status, title, task_submission_status, assignee_firebase_uid FROM project_tasks
              WHERE project_id = $1 AND task_id = $2::uuid LIMIT 1`,
             [project.project_id, req.params.taskId]
         );
@@ -1672,6 +1704,26 @@ const updateProjectTask = async (req, res) => {
                 message: 'Task not found.'
             });
         }
+        let notificationWarning = null;
+        const previousAssigneeUid = previousTask.rows[0].assignee_firebase_uid;
+        if (
+            normalized.value.assigneeProvided &&
+            normalized.value.assigneeFirebaseUid &&
+            normalized.value.assigneeFirebaseUid !== previousAssigneeUid
+        ) {
+            try {
+                await notifyTaskAssignee({
+                    recipientUid: normalized.value.assigneeFirebaseUid,
+                    actorUid: req.firebaseUid,
+                    project,
+                    taskId: result.rows[0].task_id,
+                    taskTitle: normalized.value.title
+                });
+            } catch (notificationError) {
+                console.error('Task was updated, but its assignee could not be notified:', notificationError);
+                notificationWarning = 'The task was updated, but its assignee could not be notified.';
+            }
+        }
         const previousDueDate = previousTask.rows[0].due_date
             ? new Date(previousTask.rows[0].due_date).toISOString().slice(0, 10)
             : null;
@@ -1716,7 +1768,8 @@ const updateProjectTask = async (req, res) => {
         }
         return res.status(200).json({
             success: true,
-            data: { taskId: result.rows[0].task_id }
+            data: { taskId: result.rows[0].task_id },
+            ...(notificationWarning ? { notificationWarning } : {})
         });
     } catch (error) {
         console.error('Update project task error:', error);
@@ -1786,6 +1839,21 @@ const updateProjectTaskAssignee = async (req, res) => {
             });
         }
 
+        const previousTask = await query(
+            `SELECT task_id, title, assignee_firebase_uid
+             FROM project_tasks
+             WHERE project_id = $1 AND sprint_id = $2::uuid AND task_id = $3::uuid
+             LIMIT 1`,
+            [project.project_id, req.params.sprintId, req.params.taskId]
+        );
+        if (!previousTask.rowCount) {
+            return res.status(404).json({
+                success: false,
+                code: 'TASK_NOT_FOUND',
+                message: 'Task not found in this sprint.'
+            });
+        }
+
         const updated = await query(
             `
                 UPDATE project_tasks
@@ -1805,11 +1873,30 @@ const updateProjectTaskAssignee = async (req, res) => {
                 message: 'Task not found in this sprint.'
             });
         }
+        let notificationWarning = null;
+        if (
+            assigneeFirebaseUid &&
+            assigneeFirebaseUid !== previousTask.rows[0].assignee_firebase_uid
+        ) {
+            try {
+                await notifyTaskAssignee({
+                    recipientUid: assigneeFirebaseUid,
+                    actorUid: req.firebaseUid,
+                    project,
+                    taskId: updated.rows[0].task_id,
+                    taskTitle: previousTask.rows[0].title
+                });
+            } catch (notificationError) {
+                console.error('Task assignment was updated, but the assignee could not be notified:', notificationError);
+                notificationWarning = 'The task assignment was updated, but the assignee could not be notified.';
+            }
+        }
 
         return res.status(200).json({
             success: true,
             message: 'Task assignment updated.',
-            data: { task: updated.rows[0] }
+            data: { task: updated.rows[0] },
+            ...(notificationWarning ? { notificationWarning } : {})
         });
     } catch (error) {
         console.error('Update project task assignee error:', error);

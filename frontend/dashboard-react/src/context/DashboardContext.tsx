@@ -416,6 +416,7 @@ function normalizeNotification(notification: any): NotificationRecord {
     detail: notification.detail || '',
     boardId: notification.brainstorm_board_id || null,
     relatedTaskId: notification.related_task_id || null,
+    projectId: notification.project_id || null,
     avatar: notification.avatar || '•',
     toneClass: notification.tone_class || 'coral-bg',
     invitationId: notification.invitation_id || null,
@@ -767,8 +768,6 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   projectsRef.current = projects;
   const currentUserRef = useRef<UserProfile>(currentUser);
   currentUserRef.current = currentUser;
-  const activeViewRef = useRef<DashboardView>(activeView);
-  activeViewRef.current = activeView;
   const notificationsRef = useRef<NotificationRecord[]>(notifications);
   notificationsRef.current = notifications;
 
@@ -1937,7 +1936,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const scheduleNotifPoll = (delay = 30000) => {
         notificationTimer = window.setTimeout(async () => {
           if (cancelled || !firebaseAuth.currentUser) return;
-          if (document.visibilityState === 'visible' && activeViewRef.current !== 'Notifications') {
+          if (document.visibilityState === 'visible') {
             await loadNotificationsFromAPI().catch(() => {});
           }
           scheduleNotifPoll(30000);
