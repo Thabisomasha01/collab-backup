@@ -1322,14 +1322,6 @@ form:global(.modal).project-invite-modal {
 
 }
 
-.project-invite-modal :global(.messages-create-label) select:focus, .project-invite-modal :global(.messages-create-label) input:focus {
-
-    border-color: #287B6E;
-    outline: none;
-    box-shadow: 0 0 0 3px rgba(40, 123, 110, .12);
-
-}
-
 .project-invite-modal .invite-user-search-result :global(.messages-create-avatar) {
 
     grid-row: span 2;
@@ -1339,6 +1331,14 @@ form:global(.modal).project-invite-modal {
 .project-invite-modal :global(.messages-create-submit) {
 
     min-height: 42px;
+    color: #FFFFFF;
+
+}
+
+.project-invite-modal :global(.messages-create-submit):hover,
+.project-invite-modal :global(.messages-create-submit):disabled {
+
+    color: #FFFFFF;
 
 }
 

@@ -129,9 +129,6 @@ export const ProjectBoard: React.FC = () => {
   } = useDashboard();
 
   const project = activeProject;
-  const [sprintsLoading, setSprintsLoading] = useState(false);
-  const [sprintsLoadError, setSprintsLoadError] = useState('');
-  const [sprintRetryCount, setSprintRetryCount] = useState(0);
   const [sprintTasks, setSprintTasks] = useState<OverviewTask[]>([]);
   const [sprintTasksLoading, setSprintTasksLoading] = useState(false);
   const [sprintTasksError, setSprintTasksError] = useState('');
@@ -141,25 +138,16 @@ export const ProjectBoard: React.FC = () => {
     if (!project?.projectId) return;
 
     let cancelled = false;
-    setSprintsLoading(true);
-    setSprintsLoadError('');
-
     loadProjectSprints(project.projectId)
       .catch((error: unknown) => {
         if (cancelled) return;
-        const message =
-          error instanceof Error ? error.message : 'Project sprints could not be loaded.';
         console.error('Unable to fetch project sprints for the project view:', error);
-        setSprintsLoadError(message);
-      })
-      .finally(() => {
-        if (!cancelled) setSprintsLoading(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [project?.projectId, loadProjectSprints, sprintRetryCount]);
+  }, [project?.projectId, loadProjectSprints]);
 
   const tasks = useMemo(() => {
     if (!project) return [];
@@ -469,6 +457,22 @@ export const ProjectBoard: React.FC = () => {
             projectId: project.projectId
           });
         }}
+        onAssignTeamMember={
+          isCurrentUserProjectCreator
+            ? () => {
+                const sprintId = activeViewerTask?.sprintId || activeViewerTask?.sprint_id;
+                if (!selectedTaskProject?.projectId || !sprintId) {
+                  showDashboardToast('This task is not linked to a sprint.', 'error');
+                  return;
+                }
+                setActiveModal({
+                  type: 'assignSprintTask',
+                  projectId: selectedTaskProject.projectId,
+                  sprintId: String(sprintId)
+                });
+              }
+            : undefined
+        }
         onAddComment={(tid, text) => {
           void handleAddComment(tid, text);
         }}
@@ -550,6 +554,17 @@ export const ProjectBoard: React.FC = () => {
             sprintId: String(sprintId)
           });
         }}
+        onAssignTeamMember={
+          isCurrentUserProjectCreator
+            ? () => {
+                setActiveModal({
+                  type: 'assignSprintTask',
+                  projectId: project.projectId,
+                  sprintId: String(sprintId)
+                });
+              }
+            : undefined
+        }
       />
     );
   }
@@ -568,9 +583,6 @@ export const ProjectBoard: React.FC = () => {
       allProjects={projects}
       tasks={tasks}
       allTasks={allTasks}
-      sprintsLoading={sprintsLoading}
-      sprintsLoadError={sprintsLoadError}
-      onRetrySprints={() => setSprintRetryCount((count) => count + 1)}
       canViewTaskMetrics={isCurrentUserProjectCreator}
       onSelectProject={(projectId) => {
         const selected = projects.find((item) => item.projectId === projectId);
@@ -586,6 +598,12 @@ export const ProjectBoard: React.FC = () => {
       onCreateSprint={(projectId) =>
         setActiveModal({
           type: 'addSprint',
+          projectId
+        })
+      }
+      onInviteMembers={(projectId) =>
+        setActiveModal({
+          type: 'inviteCollaborator',
           projectId
         })
       }

@@ -637,6 +637,12 @@ export const Modals: React.FC = () => {
       {activeModal.type === 'inviteCollaborator' && (
         <InviteCollaboratorModal initialProjectId={activeModal.projectId} />
       )}
+      {activeModal.type === 'assignSprintTask' && (
+        <AssignSprintTaskModal
+          projectId={activeModal.projectId}
+          sprintId={activeModal.sprintId}
+        />
+      )}
       {activeModal.type === 'manageCollaborators' && (
         <ManageCollaboratorsModal projectId={activeModal.projectId} />
       )}
@@ -781,16 +787,24 @@ const CreateProjectModal: React.FC = () => {
         if (e.target === e.currentTarget) closeModal();
       }}
     >
-      <form className="modal" id="create-group-project-form" onSubmit={handleSubmit}>
-        <button type="button" className="close-modal" aria-label="Close" onClick={closeModal}>
-          ×
-        </button>
+      <form
+        className="modal project-task-parent-form project-task-editor-modal"
+        id="create-group-project-form"
+        onSubmit={handleSubmit}
+      >
+        <div className="project-task-editor-header">
+          <div>
+            <span className="messages-create-eyebrow">NEW GROUP PROJECT</span>
+            <h2>Create Group Project</h2>
+            <p className="modal-copy">
+              Start a shared board for your team to plan, break into sprints, assign, and track work.
+            </p>
+          </div>
+          <button type="button" className="close-modal" aria-label="Close" onClick={closeModal}>
+            ×
+          </button>
+        </div>
         <div className="modal-body">
-          <p className="eyebrow">NEW GROUP PROJECT</p>
-          <h2>Create Group Project</h2>
-          <p className="modal-copy">
-            Start a shared board for your team to plan, break into sprints, assign, and track work.
-          </p>
 
           <label>
             Project Name
@@ -800,7 +814,6 @@ const CreateProjectModal: React.FC = () => {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Mobile App v2"
-              autoFocus
             />
           </label>
 
@@ -879,7 +892,11 @@ const CreateProjectModal: React.FC = () => {
             </p>
           )}
 
-          <button type="submit" className="primary-button full gold" disabled={submitting}>
+          <button
+            type="submit"
+            className="primary-button full gold project-task-submit-button"
+            disabled={submitting}
+          >
             {submitting ? 'Creating project…' : 'Create Project Board'}
           </button>
         </div>
@@ -1144,7 +1161,6 @@ const AddSprintModal: React.FC<{ projectId: string }> = ({ projectId }) => {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. API Integration"
-              autoFocus
             />
           </label>
 
@@ -1368,7 +1384,6 @@ const InviteCollaboratorModal: React.FC<{ initialProjectId?: string }> = ({
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search by name or email..."
             autoComplete="off"
-            autoFocus
           />
         </label>
 
@@ -1796,10 +1811,6 @@ const AddTaskModal: React.FC<{
     return [];
   });
   const tagPickerRef = useRef<HTMLDetailsElement>(null);
-  const assigneePickerRef = useRef<HTMLDetailsElement>(null);
-  const [assigneeFirebaseUid, setAssigneeFirebaseUid] = useState(
-    editingTask?.assigneeFirebaseUid || editingTask?.assignee_firebase_uid || ''
-  );
   const [startDate, setStartDate] = useState(() =>
     clampDate(editingTask?.startDate || editingTask?.start_date || todayKey)
   );
@@ -1809,35 +1820,6 @@ const AddTaskModal: React.FC<{
   );
 
   const [submitting, setSubmitting] = useState(false);
-  const assigneeOptions = useMemo(() => {
-    if (!targetProject) return [];
-    const members: ProjectMember[] = [
-      {
-        firebaseUid: targetProject.creatorFirebaseUid || undefined,
-        name: targetProject.creatorName,
-        email: targetProject.creatorEmail,
-        initials: targetProject.creatorInitials,
-        profileImage: targetProject.creatorProfileImage,
-        role: 'Project Owner'
-      },
-      ...(Array.isArray(targetProject.acceptedMembers) ? targetProject.acceptedMembers : [])
-    ];
-    const uniqueMembers = new Map<string, ProjectMember>();
-    members.forEach((member) => {
-      const uid = String(member.firebaseUid || member.firebase_uid || member.uid || '').trim();
-      if (!uid) return;
-      uniqueMembers.set(uid, {
-        ...member,
-        firebaseUid: uid,
-        name: member.name || member.email || 'Project member'
-      });
-    });
-    return [...uniqueMembers.values()];
-  }, [targetProject]);
-  const selectedAssignee = assigneeOptions.find(
-    (member) => member.firebaseUid === assigneeFirebaseUid
-  );
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!targetProject) {
@@ -1857,7 +1839,6 @@ const AddTaskModal: React.FC<{
       category: primaryTag,
       tag: primaryTag,
       tags: selectedTags,
-      assigneeFirebaseUid: assigneeFirebaseUid || null,
       ...(modalState.type === 'createTask'
         ? { sprintId: modalState.sprintId || null }
         : editingTask?.sprintId || editingTask?.sprint_id
@@ -1907,7 +1888,6 @@ const AddTaskModal: React.FC<{
             !event.target.closest('.project-task-tag-picker')
           ) {
             tagPickerRef.current?.removeAttribute('open');
-            assigneePickerRef.current?.removeAttribute('open');
           }
         }}
         onSubmit={handleSubmit}
@@ -1936,75 +1916,10 @@ const AddTaskModal: React.FC<{
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. Build authentication flow"
-              autoFocus
             />
           </label>
 
           <div className="project-task-priority-assignee-row">
-            <div className="project-task-assignee-field">
-              <span>Assign to</span>
-              <details
-                ref={assigneePickerRef}
-                className="project-task-tag-picker project-task-assignee-picker"
-              >
-                <summary className="project-task-tag-picker-summary">
-                  {selectedAssignee?.name || 'Unassigned'}
-                </summary>
-                <div
-                  className="project-task-assignee-options"
-                  role="radiogroup"
-                  aria-label="Assign task to one project member"
-                >
-                  <label
-                    className={`project-task-assignee-option${!assigneeFirebaseUid ? ' selected' : ''}`}
-                  >
-                    <span className="project-task-assignee-option-avatar">—</span>
-                    <span>Unassigned</span>
-                    <input
-                      type="radio"
-                      name="task-assignee"
-                      value=""
-                      checked={!assigneeFirebaseUid}
-                      onChange={() => {
-                        setAssigneeFirebaseUid('');
-                        assigneePickerRef.current?.removeAttribute('open');
-                      }}
-                    />
-                  </label>
-                  {assigneeOptions.map((member) => (
-                    <label
-                      key={member.firebaseUid}
-                      className={`project-task-assignee-option${
-                        assigneeFirebaseUid === member.firebaseUid ? ' selected' : ''
-                      }`}
-                    >
-                      <span className="messages-create-avatar">
-                        {member.profileImage || member.profile_image || member.photoURL ? (
-                          <img
-                            src={String(member.profileImage || member.profile_image || member.photoURL)}
-                            alt=""
-                          />
-                        ) : (
-                          member.initials || getUserInitials(member.name || 'Project member')
-                        )}
-                      </span>
-                      <span>{member.name}</span>
-                      <input
-                        type="radio"
-                        name="task-assignee"
-                        value={member.firebaseUid}
-                        checked={assigneeFirebaseUid === member.firebaseUid}
-                        onChange={() => {
-                          setAssigneeFirebaseUid(member.firebaseUid || '');
-                          assigneePickerRef.current?.removeAttribute('open');
-                        }}
-                      />
-                    </label>
-                  ))}
-                </div>
-              </details>
-            </div>
-
             <label>
               Priority
               <select
@@ -2060,6 +1975,238 @@ const AddTaskModal: React.FC<{
             disabled={submitting}
           >
             {submitting ? 'Saving Task…' : isEdit ? 'Save Task Changes' : 'Create Task'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
+interface SprintAssignmentTask {
+  task_id: string;
+  title: string;
+  status: string;
+  assignee_firebase_uid: string | null;
+  assignee_name?: string | null;
+}
+
+const AssignSprintTaskModal: React.FC<{ projectId: string; sprintId: string }> = ({
+  projectId,
+  sprintId
+}) => {
+  const {
+    projects,
+    closeModal,
+    loadAllProjectTasks,
+    addAuditLog,
+    showDashboardToast
+  } = useDashboard();
+  const project = projects.find((item) => item.projectId === projectId);
+  const members = useMemo(
+    () =>
+      getMeetingProjectMembers(project).map((member) => ({
+        firebaseUid: String(member.firebaseUid || ''),
+        name: String(member.name || 'Project member'),
+        initials: String(member.initials || ''),
+        profileImage: String(member.profileImage || '')
+      })),
+    [project]
+  );
+  const [tasks, setTasks] = useState<SprintAssignmentTask[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState('');
+  const [selectedMemberUid, setSelectedMemberUid] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadError('');
+    setTasks([]);
+    setSelectedTaskId('');
+    setSelectedMemberUid('');
+
+    api
+      .get<{ data?: { tasks?: SprintAssignmentTask[] } }>(
+        `/projects/${encodeURIComponent(projectId)}/tasks?sprintId=${encodeURIComponent(sprintId)}`
+      )
+      .then((response) => {
+        if (cancelled) return;
+        const sprintTasks = response?.data?.tasks;
+        if (!Array.isArray(sprintTasks)) {
+          throw new Error('The sprint tasks could not be loaded.');
+        }
+        setTasks(sprintTasks);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setLoadError(error instanceof Error ? error.message : 'The sprint tasks could not be loaded.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, sprintId]);
+
+  const selectedTask = tasks.find((item) => item.task_id === selectedTaskId);
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedTask) return;
+    setSubmitting(true);
+    try {
+      await api.patch(
+        `/projects/${encodeURIComponent(projectId)}/sprints/${encodeURIComponent(sprintId)}/tasks/${encodeURIComponent(selectedTask.task_id)}/assignee`,
+        { assigneeFirebaseUid: selectedMemberUid || null }
+      );
+      addAuditLog(
+        'Task assignment updated',
+        `${selectedTask.title} assigned to ${
+          members.find((member) => member.firebaseUid === selectedMemberUid)?.name || 'no one'
+        }.`,
+        'checkCircle'
+      );
+      showDashboardToast('Task assignment updated.', 'success');
+      closeModal();
+      loadAllProjectTasks().catch((error: unknown) => {
+        console.error('Task assignment was saved, but project tasks could not be refreshed:', error);
+        showDashboardToast('Assignment saved, but task data could not be refreshed.', 'warning');
+      });
+    } catch (error: unknown) {
+      showDashboardToast(
+        error instanceof Error ? error.message : 'The task assignment could not be updated.',
+        'error'
+      );
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="modal-backdrop"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) closeModal();
+      }}
+    >
+      <form
+        className="modal project-task-parent-form project-task-editor-modal project-task-assignment-modal"
+        onSubmit={handleSubmit}
+      >
+        <div className="project-task-editor-header">
+          <div>
+            <span className="messages-create-eyebrow">ASSIGN TEAM MEMBER</span>
+            <h2>Assign Sprint Task</h2>
+            <p className="modal-copy">
+              Choose a task in this sprint, then select an accepted project member.
+            </p>
+          </div>
+          <button type="button" className="close-modal" aria-label="Close" onClick={closeModal}>
+            ×
+          </button>
+        </div>
+        <div className="modal-body">
+          {loading && <p className="modal-copy" role="status">Loading sprint tasks…</p>}
+          {loadError && <p className="modal-copy" role="alert">{loadError}</p>}
+          {!loading && !loadError && tasks.length === 0 && (
+            <p className="modal-copy">There are no tasks in this sprint yet.</p>
+          )}
+
+          {!loading && !loadError && tasks.length > 0 && (
+            <fieldset className="project-task-assignment-members">
+              <legend>Select a sprint task</legend>
+              <div
+                className="project-task-assignee-options"
+                role="radiogroup"
+                aria-label="Sprint tasks"
+              >
+                {tasks.map((item, index) => (
+                  <label
+                    key={item.task_id}
+                    className={`project-task-assignee-option project-task-sprint-option${selectedTaskId === item.task_id ? ' selected' : ''}`}
+                  >
+                    <span className="project-task-assignee-option-avatar project-task-sprint-option-number" aria-hidden="true">
+                      {index + 1}
+                    </span>
+                    <span>{item.title}</span>
+                    <input
+                      type="radio"
+                      name="sprint-task"
+                      value={item.task_id}
+                      checked={selectedTaskId === item.task_id}
+                      onChange={() => {
+                        setSelectedTaskId(item.task_id);
+                        setSelectedMemberUid(item.assignee_firebase_uid || '');
+                      }}
+                    />
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
+
+          {selectedTask && (
+            <fieldset className="project-task-assignment-members">
+              <legend>Assign to a project member</legend>
+              {members.length ? (
+                <div
+                  className="project-task-assignee-options"
+                  role="radiogroup"
+                  aria-label="Project members"
+                >
+                  <label
+                    className={`project-task-assignee-option${selectedMemberUid ? '' : ' selected'}`}
+                  >
+                    <span className="project-task-assignee-option-avatar">—</span>
+                    <span>Unassigned</span>
+                    <input
+                      type="radio"
+                      name="sprint-task-assignee"
+                      checked={!selectedMemberUid}
+                      onChange={() => setSelectedMemberUid('')}
+                    />
+                  </label>
+                  {members.map((member) => {
+                    const uid = String(member.firebaseUid || '');
+                    const image = member.profileImage || '';
+                    return (
+                      <label
+                        key={uid}
+                        className={`project-task-assignee-option${selectedMemberUid === uid ? ' selected' : ''}`}
+                      >
+                        <span className="project-task-assignee-option-avatar">
+                          {image ? (
+                            <img src={image} alt="" />
+                          ) : (
+                            member.initials || getUserInitials(member.name || 'Project member')
+                          )}
+                        </span>
+                        <span>{member.name}</span>
+                        <input
+                          type="radio"
+                          name="sprint-task-assignee"
+                          checked={selectedMemberUid === uid}
+                          onChange={() => setSelectedMemberUid(uid)}
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="modal-copy">No accepted project members are available to assign.</p>
+              )}
+            </fieldset>
+          )}
+
+          <button
+            type="submit"
+            className="primary-button full gold project-task-submit-button"
+            disabled={loading || Boolean(loadError) || !selectedTask || submitting || members.length === 0}
+          >
+            {submitting ? 'Saving Assignment…' : 'Save Assignment'}
           </button>
         </div>
       </form>
@@ -2437,7 +2584,6 @@ const CreateReminderModal: React.FC<{ initialProjectId?: string; defaultDate?: s
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. Submit newsletter draft copy"
-              autoFocus
             />
           </label>
 
@@ -2806,7 +2952,6 @@ const CreateResourceModal: React.FC<{ initialProjectId?: string; resourceId?: st
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. Design Tokens Figma"
-              autoFocus
             />
           </label>
 
@@ -2955,9 +3100,6 @@ const ProfileOnboardingModal: React.FC = () => {
               onClick={() => {
                 dismiss();
                 switchView('Settings');
-                window.setTimeout(() => {
-                  (document.querySelector('#profile-name-input') as HTMLInputElement | null)?.focus();
-                }, 50);
               }}
             >
               Update my profile

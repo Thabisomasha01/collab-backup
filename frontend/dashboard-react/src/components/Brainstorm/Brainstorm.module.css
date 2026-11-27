@@ -26,22 +26,9 @@ label.brainstorm-create-board-field {
 
 }
 
-label.brainstorm-create-board-field input:focus {
-
-    border-color: #18A98F;
-    box-shadow: 0 0 0 3px rgba(24, 169, 143, .22);
-
-}
-
 .brainstorm-board-name-input {
 
     align-self: stretch;
-
-}
-
-.brainstorm-board-name-input:focus-within :global(.input-icon-svg) {
-
-    color: #18A98F;
 
 }
 
@@ -1372,13 +1359,6 @@ form:global(.modal) .brainstorm-board-member-option input[type="checkbox"] {
 .brainstorm-autosave-switch input:checked + .brainstorm-autosave-track::after {
 
     transform: translateX(13px);
-
-}
-
-.brainstorm-autosave-switch input:focus-visible + .brainstorm-autosave-track {
-
-    outline: 2px solid #16806F;
-    outline-offset: 2px;
 
 }
 

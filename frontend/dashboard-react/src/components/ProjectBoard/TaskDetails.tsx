@@ -48,6 +48,7 @@ export interface TaskDetailsProps {
   isProjectOwner?: boolean;
   onOpenAnalysis?: () => void;
   onAddTask?: () => void;
+  onAssignTeamMember?: () => void;
   onToggleSubtask?: (taskId: string | number, subtaskId: string) => void;
   onAddComment?: (taskId: string | number, text: string) => void;
   onUploadAttachment?: (taskId: string | number, files: TaskAttachment[]) => void;
@@ -97,6 +98,7 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
   isProjectOwner = false,
   onOpenAnalysis,
   onAddTask,
+  onAssignTeamMember,
   onToggleSubtask,
   onAddComment,
   onUploadAttachment
@@ -874,6 +876,9 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
               <button
                 type="button"
                 className={styles['quick-action-card']}
+                onClick={onAssignTeamMember}
+                disabled={!onAssignTeamMember}
+                title={!onAssignTeamMember ? 'Only project owners can assign team members.' : undefined}
               >
                 <span
                   className={`${styles['quick-action-icon-box']} ${styles['assign-team-icon-box']}`}
@@ -885,7 +890,7 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
                   <span className={styles['quick-action-plus-badge']}>+</span>
                 </span>
                 <span className={styles['quick-action-text']}>
-                  <span className={styles['quick-action-title']}>Assign Team</span>
+                  <span className={styles['quick-action-title']}>Assign Team Member</span>
                   <span className={styles['quick-action-subtitle']}>
                     Organize assignees to this task
                   </span>

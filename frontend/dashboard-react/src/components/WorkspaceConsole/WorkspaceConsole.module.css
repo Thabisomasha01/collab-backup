@@ -295,14 +295,6 @@
 
 }
 
-.admin-members-project-filter:focus-visible {
-
-    border-color: #D4A500;
-    outline: 2px solid rgba(245, 184, 0, .2);
-    outline-offset: 1px;
-
-}
-
 .admin-members-header-controls > #admin-members-invite-btn {
 
     box-sizing: border-box;
@@ -1345,14 +1337,6 @@ select:not(.admin-members-project-filter) {
 
 }
 
-select:not(.admin-members-project-filter):focus-visible {
-
-    border-color: #287B6E;
-    outline: 0;
-    box-shadow: 0 0 0 3px rgba(40, 123, 110, .12);
-
-}
-
 .admin-members-project-filter:disabled {
 
     cursor: not-allowed;
@@ -1366,14 +1350,6 @@ select:not(.admin-members-project-filter):focus-visible {
     border-radius: 9px;
     color: #202A29;
     transition: border-color .15s, box-shadow .15s, background-color .15s;
-
-}
-
-.admin-members-project-filter:focus-visible {
-
-    border-color: #287B6E;
-    outline: 0;
-    box-shadow: 0 0 0 3px rgba(40, 123, 110, .12);
 
 }
 
@@ -1667,4 +1643,3 @@ select:not(.admin-members-project-filter):focus-visible {
     border-color: #EF4444;
     background: #DC2626;
 }
-

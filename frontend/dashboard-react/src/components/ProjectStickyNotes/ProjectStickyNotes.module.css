@@ -388,15 +388,6 @@
 }
 
 
-.project-sticky-note-modal :global(.messages-create-label) textarea:focus, .project-sticky-note-modal :global(.messages-create-label) select:focus {
-
-    border-color: #287B6E;
-    outline: none;
-    box-shadow: 0 0 0 3px rgba(40, 123, 110, .12);
-
-}
-
-
 .project-sticky-sharing > :global(.messages-create-label) {
 
     margin: 0;

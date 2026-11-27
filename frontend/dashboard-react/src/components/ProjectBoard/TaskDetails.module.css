@@ -38,9 +38,7 @@
   cursor: pointer;
 }
 
-.task-viewer-shell button:focus-visible,
-.task-viewer-shell input:focus-visible,
-.task-viewer-shell select:focus-visible {
+.task-viewer-shell button:focus-visible {
   outline: 3px solid rgba(37, 99, 235, 0.2);
   outline-offset: 2px;
 }
@@ -405,6 +403,17 @@
   transform: scale(1.04);
 }
 
+.quick-action-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.quick-action-card:disabled:hover {
+  border-color: inherit;
+  box-shadow: none;
+  transform: none;
+}
+
 .quick-action-icon-box {
   position: relative;
   order: 2;
@@ -707,13 +716,6 @@
 
 .inline-new-card select {
   padding: 0 8px;
-}
-
-.inline-new-card input:focus,
-.inline-new-card select:focus,
-.comment-input:focus {
-  border-color: #60a5fa;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .inline-subtask-save,

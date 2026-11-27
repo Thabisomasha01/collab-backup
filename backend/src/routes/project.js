@@ -31,6 +31,7 @@ const {
     reviewProjectTaskSubmission,
     submitProjectTaskForReview,
     updateProjectTaskDependencies,
+    updateProjectTaskAssignee,
     updateProjectTask,
     updateProjectTaskStatus
 } = require('../controllers/taskController');
@@ -119,6 +120,7 @@ router.get('/:projectId/tasks/:taskId/comments', getProjectTaskComments);
 router.post('/:projectId/tasks/:taskId/comments', createProjectTaskComment);
 router.get('/:projectId/tasks/:taskId/dependencies', getProjectTaskDependencies);
 router.put('/:projectId/tasks/:taskId/dependencies', updateProjectTaskDependencies);
+router.patch('/:projectId/sprints/:sprintId/tasks/:taskId/assignee', updateProjectTaskAssignee);
 router.patch('/:projectId/tasks/:taskId/status', updateProjectTaskStatus);
 router.put('/:projectId/tasks/:taskId', updateProjectTask);
 router.delete('/:projectId/tasks/:taskId', deleteProjectTask);

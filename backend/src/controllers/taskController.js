@@ -1728,6 +1728,99 @@ const updateProjectTask = async (req, res) => {
     }
 };
 
+const updateProjectTaskAssignee = async (req, res) => {
+    if (!uuidPattern.test(req.params.taskId) || !uuidPattern.test(req.params.sprintId)) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK_OR_SPRINT_ID',
+            message: 'Task or sprint ID is invalid.'
+        });
+    }
+    if (!Object.prototype.hasOwnProperty.call(req.body || {}, 'assigneeFirebaseUid')) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK_ASSIGNEE',
+            message: 'Choose a project member or select Unassigned.'
+        });
+    }
+
+    const rawAssigneeUid = req.body.assigneeFirebaseUid;
+    if (rawAssigneeUid !== null && typeof rawAssigneeUid !== 'string') {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK_ASSIGNEE',
+            message: 'The assignee is invalid.'
+        });
+    }
+    const assigneeFirebaseUid =
+        typeof rawAssigneeUid === 'string' ? rawAssigneeUid.trim() || null : null;
+    if (assigneeFirebaseUid && assigneeFirebaseUid.length > 128) {
+        return res.status(400).json({
+            success: false,
+            code: 'INVALID_TASK_ASSIGNEE',
+            message: 'The assignee is invalid.'
+        });
+    }
+
+    try {
+        const project = await getProjectAndCheckAccess(req.params.projectId, req.firebaseUid, true);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                code: 'PROJECT_NOT_FOUND',
+                message: 'Project not found or you are not its creator.'
+            });
+        }
+        if (!(await validateProjectTaskSprint(project.project_id, req.params.sprintId))) {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_TASK_SPRINT',
+                message: 'Choose a sprint in this project.'
+            });
+        }
+        if (!(await validateProjectTaskAssignee(project.project_id, assigneeFirebaseUid))) {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_TASK_ASSIGNEE',
+                message: 'The assignee must be the project owner or an accepted project member.'
+            });
+        }
+
+        const updated = await query(
+            `
+                UPDATE project_tasks
+                SET assignee_firebase_uid = $4,
+                    updated_at = NOW()
+                WHERE project_id = $1
+                  AND sprint_id = $2::uuid
+                  AND task_id = $3::uuid
+                RETURNING task_id, project_id, sprint_id::text AS sprint_id, assignee_firebase_uid
+            `,
+            [project.project_id, req.params.sprintId, req.params.taskId, assigneeFirebaseUid]
+        );
+        if (!updated.rowCount) {
+            return res.status(404).json({
+                success: false,
+                code: 'TASK_NOT_FOUND',
+                message: 'Task not found in this sprint.'
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Task assignment updated.',
+            data: { task: updated.rows[0] }
+        });
+    } catch (error) {
+        console.error('Update project task assignee error:', error);
+        return res.status(500).json({
+            success: false,
+            code: 'PROJECT_TASK_ASSIGNEE_UPDATE_FAILED',
+            message: 'The task assignment could not be updated.'
+        });
+    }
+};
+
 const updateProjectTaskStatus = async (req, res) => {
     if (!uuidPattern.test(req.params.taskId)) {
         return res.status(400).json({
@@ -2080,5 +2173,6 @@ module.exports = {
     submitProjectTaskForReview,
     updateProjectTaskDependencies,
     updateProjectTask,
+    updateProjectTaskAssignee,
     updateProjectTaskStatus
 };

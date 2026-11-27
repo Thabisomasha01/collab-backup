@@ -686,6 +686,7 @@ export type ActiveModalState =
   | { type: 'editProject'; projectId: string }
   | { type: 'addSprint'; projectId: string }
   | { type: 'inviteCollaborator'; projectId?: string }
+  | { type: 'assignSprintTask'; projectId: string; sprintId: string }
   | { type: 'manageCollaborators'; projectId: string }
   | {
       type: 'createTask';
