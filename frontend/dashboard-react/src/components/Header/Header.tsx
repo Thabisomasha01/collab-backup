@@ -150,7 +150,11 @@ export const Header: React.FC = () => {
         /^\d{4}-\d{2}-\d{2}$/.test(rawDue) && rawDue >= todayKey ? rawDue : todayKey;
       const priorityValue = String(parsed.priority || 'medium').toLowerCase();
       const priority: TaskPriority =
-        priorityValue === 'high' || priorityValue === 'low' || priorityValue === 'medium'
+        priorityValue === 'none' ||
+        priorityValue === 'low' ||
+        priorityValue === 'medium' ||
+        priorityValue === 'high' ||
+        priorityValue === 'urgent'
           ? priorityValue
           : 'medium';
 

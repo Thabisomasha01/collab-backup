@@ -1,5 +1,5 @@
 import { signOut } from 'firebase/auth';
-import { apiBaseUrl, firebaseAuth, markCurrentUserOffline, socketBaseUrl } from './firebase';
+import { apiBaseUrl, firebaseAuth, markCurrentUserOffline } from './firebase';
 
 export class ApiError extends Error {
   status: number;
@@ -108,4 +108,4 @@ export const api = {
     })
 };
 
-export { apiBaseUrl, socketBaseUrl };
+export { apiBaseUrl };

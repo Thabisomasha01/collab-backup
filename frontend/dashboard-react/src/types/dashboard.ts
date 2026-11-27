@@ -39,7 +39,7 @@ export type TaskFilterKey =
   | 'blocked'
   | 'done';
 
-export type TaskPriority = 'low' | 'medium' | 'high';
+export type TaskPriority = 'none' | 'low' | 'medium' | 'high' | 'urgent';
 
 export type ProjectColor =
   | 'red'
@@ -261,6 +261,8 @@ export interface TaskItem {
   done?: boolean;
   progress: number;
   sprint?: string;
+  sprintId?: string;
+  sprint_id?: string;
   sprintMembers?: ProjectMember[];
   assigneeFirebaseUid?: string | null;
   assignee_firebase_uid?: string | null;
@@ -690,6 +692,7 @@ export type ActiveModalState =
       projectId?: string;
       defaultStatus?: TaskStatus;
       defaultDate?: string;
+      sprintId?: string;
       prefill?: {
         title?: string;
         description?: string;

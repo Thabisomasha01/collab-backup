@@ -11,10 +11,9 @@ export const Sidebar: React.FC = () => {
     activeView,
     switchView,
     selectedTaskViewId,
-    openFullTaskView,
+    openFullSprintView,
     projects,
     projectsLoaded,
-    accessibleTasks,
     currentUser,
     unreadNotificationCount,
     messagesUnreadCount,
@@ -199,13 +198,7 @@ export const Sidebar: React.FC = () => {
             const isProjectActive = activeView === project.name;
             const isProjectExpanded =
               isProjectActive && collapsedProjectId !== project.projectId;
-            const projectTasks = accessibleTasks.filter(
-              (task) =>
-                task.projectId === project.projectId ||
-                task.project_id === project.projectId ||
-                task.project === project.name
-            );
-            const taskListId = `project-tasks-${project.projectId}`;
+            const projectItemsId = `project-items-${project.projectId}`;
 
             return (
               <React.Fragment key={project.projectId}>
@@ -216,7 +209,7 @@ export const Sidebar: React.FC = () => {
                   data-view={project.name}
                   href={`#${encodeURIComponent(project.name.toLowerCase().replace(/\s+/g, '-'))}`}
                   aria-expanded={isProjectExpanded}
-                  aria-controls={isProjectExpanded ? taskListId : undefined}
+                  aria-controls={isProjectExpanded ? projectItemsId : undefined}
                   onClick={(e) => {
                     if (isProjectActive && selectedTaskViewId === null) {
                       setCollapsedProjectId((current) =>
@@ -248,38 +241,30 @@ export const Sidebar: React.FC = () => {
                 </a>
                 {isProjectExpanded && (
                   <ul
-                    id={taskListId}
+                    id={projectItemsId}
                     className={cx('project-task-list')}
-                    aria-label={`${project.name} tasks`}
+                    aria-label={`${project.name} sprints`}
                   >
-                    {projectTasks.length > 0 ? (
-                      projectTasks.map((task) => {
-                        const tid = task.taskId || task.task_id || task.id;
-                        const isSelectedTask =
-                          selectedTaskViewId !== null &&
-                          (String(selectedTaskViewId) === String(task.id) ||
-                            String(selectedTaskViewId) === String(tid));
-                        return (
-                          <li key={tid}>
-                            <span className={cx('project-task-branch')} aria-hidden="true" />
-                            <button
-                              type="button"
-                              className={cx('project-task-open', {
-                                'is-active': isSelectedTask
-                              })}
-                              onClick={() => openFullTaskView(tid, project.name)}
-                              aria-label={`View task: ${task.title}`}
-                            >
-                              <span className={cx('project-task-file-icon')} aria-hidden="true">
-                                📄
-                              </span>
-                              <span className={cx('project-task-title')}>{task.title}</span>
-                            </button>
-                          </li>
-                        );
-                      })
-                    ) : (
-                      <li className={cx('project-task-empty')}>No tasks yet</li>
+                    {project.sprints.map((sprint) => (
+                      <li key={`sprint-${sprint.id || sprint.sprintId || sprint.name}`}>
+                        <span className={cx('project-task-branch')} aria-hidden="true" />
+                        <button
+                          type="button"
+                          className={cx('project-task-open')}
+                          onClick={() =>
+                            openFullSprintView(sprint, project.projectId, project.name)
+                          }
+                          aria-label={`View sprint: ${sprint.name}`}
+                        >
+                          <span className={cx('project-task-file-icon')} aria-hidden="true">
+                            📄
+                          </span>
+                          <span className={cx('project-task-title')}>{sprint.name}</span>
+                        </button>
+                      </li>
+                    ))}
+                    {project.sprints.length === 0 && (
+                      <li className={cx('project-task-empty')}>No sprints yet</li>
                     )}
                   </ul>
                 )}

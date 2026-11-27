@@ -12,6 +12,11 @@ export default defineConfig({
       '/api': {
         target: 'https://collab-backup-backend.onrender.com',
         changeOrigin: true
+      },
+      '/socket.io': {
+        target: 'https://collab-backup-backend.onrender.com',
+        changeOrigin: true,
+        ws: true
       }
     }
   }

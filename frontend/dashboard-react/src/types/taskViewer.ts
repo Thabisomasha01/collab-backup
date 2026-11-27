@@ -31,7 +31,7 @@ export interface TaskSubtask {
   assignees?: ProjectMember[];
 }
 
-export type BoardColumnStatus = 'Pending' | 'In Progress' | 'Completed' | 'Launched';
+export type BoardColumnStatus = 'To do' | 'In Progress' | 'Pending' | 'Done' | 'Launched';
 
 export interface BoardCardItem {
   id: string;
@@ -40,7 +40,7 @@ export interface BoardCardItem {
   assignees: ProjectMember[];
   due?: string;
   dueDateKey?: string;
-  priority?: 'high' | 'normal' | 'low';
+  priority?: TaskPriority;
   progress?: number;
   overdue?: boolean;
 }

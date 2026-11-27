@@ -63,16 +63,26 @@ function getOverviewTask(task: TaskItem, project: Project): OverviewTask {
 }
 
 function toBoardStatus(status?: string): BoardColumnStatus {
-  if (status === 'Done') return 'Completed';
-  if (status === 'In progress') return 'In Progress';
+  const normalized = String(status || '').trim().toLowerCase();
+  if (normalized === 'to do' || normalized === 'todo') return 'To do';
+  if (normalized === 'in progress') return 'In Progress';
+  if (normalized === 'done') return 'Done';
+  if (normalized === 'launched') return 'Launched';
   return 'Pending';
 }
 
-function toBoardPriority(priority?: string): 'high' | 'normal' | 'low' {
+function toBoardPriority(priority?: string): TaskItem['priority'] {
   const normalized = String(priority || '').toLowerCase();
-  if (normalized === 'high') return 'high';
-  if (normalized === 'low') return 'low';
-  return 'normal';
+  if (
+    normalized === 'none' ||
+    normalized === 'low' ||
+    normalized === 'medium' ||
+    normalized === 'high' ||
+    normalized === 'urgent'
+  ) {
+    return normalized;
+  }
+  return 'medium';
 }
 
 function normalizeTaskComment(raw: Record<string, unknown>, idx: number): TaskComment {
@@ -104,10 +114,13 @@ export const ProjectBoard: React.FC = () => {
     activeProject,
     isCurrentUserProjectCreator,
     projects,
+    loadProjectSprints,
     accessibleTasks,
     switchView,
     selectedTaskViewId,
     openFullTaskView,
+    selectedSprintView,
+    closeFullSprintView,
     openTaskDetails,
     moveTaskStatus,
     setActiveModal,
@@ -116,6 +129,37 @@ export const ProjectBoard: React.FC = () => {
   } = useDashboard();
 
   const project = activeProject;
+  const [sprintsLoading, setSprintsLoading] = useState(false);
+  const [sprintsLoadError, setSprintsLoadError] = useState('');
+  const [sprintRetryCount, setSprintRetryCount] = useState(0);
+  const [sprintTasks, setSprintTasks] = useState<OverviewTask[]>([]);
+  const [sprintTasksLoading, setSprintTasksLoading] = useState(false);
+  const [sprintTasksError, setSprintTasksError] = useState('');
+  const [sprintTasksRetryCount, setSprintTasksRetryCount] = useState(0);
+
+  useEffect(() => {
+    if (!project?.projectId) return;
+
+    let cancelled = false;
+    setSprintsLoading(true);
+    setSprintsLoadError('');
+
+    loadProjectSprints(project.projectId)
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const message =
+          error instanceof Error ? error.message : 'Project sprints could not be loaded.';
+        console.error('Unable to fetch project sprints for the project view:', error);
+        setSprintsLoadError(message);
+      })
+      .finally(() => {
+        if (!cancelled) setSprintsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.projectId, loadProjectSprints, sprintRetryCount]);
 
   const tasks = useMemo(() => {
     if (!project) return [];
@@ -142,6 +186,80 @@ export const ProjectBoard: React.FC = () => {
       }),
     [accessibleTasks, projects]
   );
+
+  useEffect(() => {
+    if (
+      !project?.projectId ||
+      !selectedSprintView ||
+      selectedSprintView.projectId !== project.projectId
+    ) {
+      setSprintTasks([]);
+      setSprintTasksLoading(false);
+      setSprintTasksError('');
+      return;
+    }
+
+    const selectedSprint = selectedSprintView.sprint;
+    const selectedSprintId = String(selectedSprint.id || selectedSprint.sprintId || '');
+    let cancelled = false;
+    setSprintTasksLoading(true);
+    setSprintTasksError('');
+
+    if (!selectedSprintId) {
+      setSprintTasks([]);
+      setSprintTasksLoading(false);
+      setSprintTasksError('This sprint does not have an ID, so its tasks cannot be loaded.');
+      return;
+    }
+
+    api
+      .get(
+        `/projects/${encodeURIComponent(project.projectId)}/tasks?sprintId=${encodeURIComponent(selectedSprintId)}`
+      )
+      .then((response) => {
+        if (cancelled) return;
+        const rawTasks = response?.data?.tasks;
+        if (!Array.isArray(rawTasks)) {
+          throw new Error('The server returned an invalid project tasks response.');
+        }
+        const fetchedSprintTasks = rawTasks
+          .map((task: TaskItem) => normalizeTaskRecord(task, project))
+          .filter(
+            (task: TaskItem) =>
+              String(task.sprintId || task.sprint_id || '') === selectedSprintId
+          );
+        const loadedSprintTasks =
+          fetchedSprintTasks.length > 0
+            ? fetchedSprintTasks
+            : tasks.filter(
+                (task) =>
+                  (task.projectId === project.projectId ||
+                    task.project_id === project.projectId) &&
+                  String(task.sprintId || task.sprint_id || '') === selectedSprintId
+              );
+        setSprintTasks(loadedSprintTasks.map((task) => getOverviewTask(task, project)));
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const message =
+          error instanceof Error ? error.message : 'Sprint tasks could not be loaded.';
+        console.error('Unable to fetch tasks for the selected sprint:', error);
+        setSprintTasksError(message);
+      })
+      .finally(() => {
+        if (!cancelled) setSprintTasksLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    project,
+    tasks,
+    selectedSprintView,
+    accessibleTasks,
+    sprintTasksRetryCount
+  ]);
 
   const selectedTaskBase = useMemo(() => {
     if (selectedTaskViewId === null) return null;
@@ -360,6 +478,82 @@ export const ProjectBoard: React.FC = () => {
     );
   }
 
+  if (selectedSprintView?.projectId === project?.projectId && project) {
+    const sprint = selectedSprintView.sprint;
+    const sprintId = sprint.id || sprint.sprintId || '';
+    const sprintEndDate =
+      sprint.dueDate || sprint.due_date || sprint.endDate || sprint.end_date || null;
+    const status = ['Backlog', 'To do', 'In progress', 'Blocked', 'Done'].includes(
+      sprint.status || ''
+    )
+      ? (sprint.status as TaskItem['status'])
+      : 'To do';
+    const sprintTask: ViewerTaskItem = {
+      id: `sprint-${sprint.id || sprint.sprintId || sprint.name}`,
+      projectId: project.projectId,
+      project_id: project.projectId,
+      project: project.name,
+      sprintId: String(sprintId),
+      sprint_id: String(sprintId),
+      title: sprint.name,
+      description: sprint.description || '',
+      tag: 'Sprint',
+      category: 'Sprint',
+      tags: [],
+      due: sprintEndDate || '—',
+      date: sprintEndDate,
+      startDate: sprint.startDate || sprint.start_date || null,
+      status,
+      priority: 'medium',
+      progress: 0,
+      sprint: sprint.name,
+      subtasks: sprintTasks.map((task) => ({
+        id: String(task.id),
+        title: task.title,
+        done: task.status === 'Done',
+        due: task.due,
+        assignees: task.assignees || task.sprintMembers || []
+      })),
+      boardItems: sprintTasks.map((task) => ({
+        id: String(task.id),
+        title: task.title,
+        status: toBoardStatus(task.status),
+        assignees: task.assignees || task.sprintMembers || [],
+        due: task.due === '—' ? undefined : task.due,
+        dueDateKey: task.date || undefined,
+        priority: toBoardPriority(task.priority)
+      })),
+      descriptionAttachments: [
+        ...(sprint.attachments || []),
+        ...sprintTasks.flatMap((task) => [
+          ...(task.descriptionAttachments || []),
+          ...(task.taskSubmissionAttachments || [])
+        ])
+      ],
+      comments: 0,
+      commentsList: []
+    };
+
+    return (
+      <TaskDetails
+        task={sprintTask}
+        project={project}
+        loading={sprintTasksLoading}
+        error={sprintTasksError}
+        onRetry={() => setSprintTasksRetryCount((count) => count + 1)}
+        isProjectOwner={true}
+        onOpenAnalysis={() => openTaskDetails(sprintTask.id)}
+        onAddTask={() => {
+          setActiveModal({
+            type: 'createTask',
+            projectId: project.projectId,
+            sprintId: String(sprintId)
+          });
+        }}
+      />
+    );
+  }
+
   if (!project) {
     return (
       <div role="status" style={{ padding: 24 }}>
@@ -374,6 +568,9 @@ export const ProjectBoard: React.FC = () => {
       allProjects={projects}
       tasks={tasks}
       allTasks={allTasks}
+      sprintsLoading={sprintsLoading}
+      sprintsLoadError={sprintsLoadError}
+      onRetrySprints={() => setSprintRetryCount((count) => count + 1)}
       canViewTaskMetrics={isCurrentUserProjectCreator}
       onSelectProject={(projectId) => {
         const selected = projects.find((item) => item.projectId === projectId);
@@ -390,13 +587,6 @@ export const ProjectBoard: React.FC = () => {
         setActiveModal({
           type: 'addSprint',
           projectId
-        })
-      }
-      onAddTask={(projectId, title) =>
-        setActiveModal({
-          type: 'createTask',
-          projectId,
-          prefill: { title }
         })
       }
     />

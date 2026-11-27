@@ -1143,7 +1143,7 @@ const AddSprintModal: React.FC<{ projectId: string }> = ({ projectId }) => {
               maxLength={255}
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Sprint 2: API Integration"
+              placeholder="e.g. API Integration"
               autoFocus
             />
           </label>
@@ -1675,9 +1675,10 @@ const AddTaskModal: React.FC<{
   modalState:
     | {
         type: 'createTask';
-          projectId?: string;
-          defaultStatus?: TaskStatus;
+        projectId?: string;
+        defaultStatus?: TaskStatus;
         defaultDate?: string;
+        sprintId?: string;
         prefill?: {
           title?: string;
           description?: string;
@@ -1726,7 +1727,7 @@ const AddTaskModal: React.FC<{
     selectableProjects[0]?.projectId ||
     '';
 
-  const [selectedProjectId, setSelectedProjectId] = useState(initialProjectId);
+  const selectedProjectId = initialProjectId;
   const targetProject =
     projects.find((p) => p.projectId === selectedProjectId) || selectableProjects[0];
 
@@ -1737,16 +1738,29 @@ const AddTaskModal: React.FC<{
   }, [targetProject?.startDate, todayKey]);
   const maxProjectDate = useMemo(() => {
     const projectDueDate = normalizeDateKey(targetProject?.dueDate);
+    const selectedSprint =
+      modalState.type === 'createTask' && modalState.sprintId
+        ? targetProject?.sprints?.find(
+            (sprint) =>
+              String(sprint.id || sprint.sprintId || '') === String(modalState.sprintId)
+          )
+        : undefined;
     const activeSprint =
+      selectedSprint ||
       targetProject?.sprints?.find((sprint) =>
         ['active', 'in progress'].includes(String(sprint.status || '').toLowerCase())
-      ) || targetProject?.sprints?.[0];
+      ) ||
+      targetProject?.sprints?.[0];
     const sprintDueDate = normalizeDateKey(
       activeSprint?.dueDate || activeSprint?.endDate || activeSprint?.end_date
     );
     const dates = [projectDueDate, sprintDueDate].filter((date): date is string => Boolean(date));
     return dates.sort()[0] || null;
-  }, [targetProject?.dueDate, targetProject?.sprints]);
+  }, [
+    targetProject?.dueDate,
+    targetProject?.sprints,
+    modalState.type === 'createTask' ? modalState.sprintId : undefined
+  ]);
 
   const clampDate = (val?: string | null) => {
     const dk = normalizeDateKey(val);
@@ -1773,7 +1787,7 @@ const AddTaskModal: React.FC<{
       (modalState.type === 'createTask' && modalState.defaultStatus) ||
       'To do'
   );
-  const [priority] = useState<TaskPriority>(
+  const [priority, setPriority] = useState<TaskPriority>(
     editingTask?.priority || prefill?.priority || 'medium'
   );
   const [selectedTags] = useState<string[]>(() => {
@@ -1844,7 +1858,11 @@ const AddTaskModal: React.FC<{
       tag: primaryTag,
       tags: selectedTags,
       assigneeFirebaseUid: assigneeFirebaseUid || null,
-      sprint: editingTask?.sprint || null,
+      ...(modalState.type === 'createTask'
+        ? { sprintId: modalState.sprintId || null }
+        : editingTask?.sprintId || editingTask?.sprint_id
+          ? { sprintId: editingTask.sprintId || editingTask.sprint_id }
+          : {}),
       startDate,
       dueDate,
       descriptionAttachments: attachments
@@ -1910,88 +1928,6 @@ const AddTaskModal: React.FC<{
         </div>
         <div className="modal-body">
           <label>
-            Project Board
-            <select
-              value={selectedProjectId}
-              disabled={isEdit}
-              onChange={(e) => {
-                setSelectedProjectId(e.target.value);
-                setAssigneeFirebaseUid('');
-              }}
-            >
-              {selectableProjects.map((p) => (
-                <option key={p.projectId} value={p.projectId}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div className="project-task-assignee-field">
-            <span>Assign to</span>
-            <details
-              ref={assigneePickerRef}
-              className="project-task-tag-picker project-task-assignee-picker"
-            >
-              <summary className="project-task-tag-picker-summary">
-                {selectedAssignee?.name || 'Unassigned'}
-              </summary>
-              <div
-                className="project-task-assignee-options"
-                role="radiogroup"
-                aria-label="Assign task to one project member"
-              >
-                <label
-                  className={`project-task-assignee-option${!assigneeFirebaseUid ? ' selected' : ''}`}
-                >
-                  <span className="project-task-assignee-option-avatar">—</span>
-                  <span>Unassigned</span>
-                  <input
-                    type="radio"
-                    name="task-assignee"
-                    value=""
-                    checked={!assigneeFirebaseUid}
-                    onChange={() => {
-                      setAssigneeFirebaseUid('');
-                      assigneePickerRef.current?.removeAttribute('open');
-                    }}
-                  />
-                </label>
-                {assigneeOptions.map((member) => (
-                  <label
-                    key={member.firebaseUid}
-                    className={`project-task-assignee-option${
-                      assigneeFirebaseUid === member.firebaseUid ? ' selected' : ''
-                    }`}
-                  >
-                    <span className="messages-create-avatar">
-                      {member.profileImage || member.profile_image || member.photoURL ? (
-                        <img
-                          src={String(member.profileImage || member.profile_image || member.photoURL)}
-                          alt=""
-                        />
-                      ) : (
-                        member.initials || getUserInitials(member.name || 'Project member')
-                      )}
-                    </span>
-                    <span>{member.name}</span>
-                    <input
-                      type="radio"
-                      name="task-assignee"
-                      value={member.firebaseUid}
-                      checked={assigneeFirebaseUid === member.firebaseUid}
-                      onChange={() => {
-                        setAssigneeFirebaseUid(member.firebaseUid || '');
-                        assigneePickerRef.current?.removeAttribute('open');
-                      }}
-                    />
-                  </label>
-                ))}
-              </div>
-            </details>
-          </div>
-
-          <label>
             Task Title
             <input
               type="text"
@@ -2003,6 +1939,86 @@ const AddTaskModal: React.FC<{
               autoFocus
             />
           </label>
+
+          <div className="project-task-priority-assignee-row">
+            <div className="project-task-assignee-field">
+              <span>Assign to</span>
+              <details
+                ref={assigneePickerRef}
+                className="project-task-tag-picker project-task-assignee-picker"
+              >
+                <summary className="project-task-tag-picker-summary">
+                  {selectedAssignee?.name || 'Unassigned'}
+                </summary>
+                <div
+                  className="project-task-assignee-options"
+                  role="radiogroup"
+                  aria-label="Assign task to one project member"
+                >
+                  <label
+                    className={`project-task-assignee-option${!assigneeFirebaseUid ? ' selected' : ''}`}
+                  >
+                    <span className="project-task-assignee-option-avatar">—</span>
+                    <span>Unassigned</span>
+                    <input
+                      type="radio"
+                      name="task-assignee"
+                      value=""
+                      checked={!assigneeFirebaseUid}
+                      onChange={() => {
+                        setAssigneeFirebaseUid('');
+                        assigneePickerRef.current?.removeAttribute('open');
+                      }}
+                    />
+                  </label>
+                  {assigneeOptions.map((member) => (
+                    <label
+                      key={member.firebaseUid}
+                      className={`project-task-assignee-option${
+                        assigneeFirebaseUid === member.firebaseUid ? ' selected' : ''
+                      }`}
+                    >
+                      <span className="messages-create-avatar">
+                        {member.profileImage || member.profile_image || member.photoURL ? (
+                          <img
+                            src={String(member.profileImage || member.profile_image || member.photoURL)}
+                            alt=""
+                          />
+                        ) : (
+                          member.initials || getUserInitials(member.name || 'Project member')
+                        )}
+                      </span>
+                      <span>{member.name}</span>
+                      <input
+                        type="radio"
+                        name="task-assignee"
+                        value={member.firebaseUid}
+                        checked={assigneeFirebaseUid === member.firebaseUid}
+                        onChange={() => {
+                          setAssigneeFirebaseUid(member.firebaseUid || '');
+                          assigneePickerRef.current?.removeAttribute('open');
+                        }}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </details>
+            </div>
+
+            <label>
+              Priority
+              <select
+                value={priority}
+                onChange={(event) => setPriority(event.target.value as TaskPriority)}
+              >
+                <option value="none">No Priority</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </label>
+          </div>
 
           {/* Schedule Calendar Picker */}
           <div className="cal-schedule-picker-card">

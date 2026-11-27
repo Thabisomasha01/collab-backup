@@ -89,7 +89,7 @@ const normalizeTaskSubmissionLinks = value => {
 };
 
 const allowedStatuses = new Set(['Backlog', 'To do', 'In progress', 'Blocked', 'Done']);
-const allowedPriorities = new Set(['low', 'medium', 'high']);
+const allowedPriorities = new Set(['none', 'low', 'medium', 'high', 'urgent']);
 const allowedTaskTags = new Set([
     'Accessibility',
     'Blocked',
@@ -288,6 +288,8 @@ const normalizeTaskInput = body => {
     const descriptionAttachments = body?.descriptionAttachments ?? [];
     const assigneeProvided = body?.assigneeFirebaseUid !== undefined;
     const assigneeFirebaseUid = body?.assigneeFirebaseUid;
+    const sprintIdProvided = body?.sprintId !== undefined;
+    const sprintId = body?.sprintId || null;
 
     if (!title || title.length > 255) {
         return { error: 'Task title is required and cannot exceed 255 characters.' };
@@ -314,6 +316,9 @@ const normalizeTaskInput = body => {
     }
     if (chatMessageId !== null && !uuidPattern.test(chatMessageId)) {
         return { error: 'The discussion message reference is invalid.' };
+    }
+    if (sprintId !== null && (typeof sprintId !== 'string' || !uuidPattern.test(sprintId))) {
+        return { error: 'Choose a valid project sprint.' };
     }
     if (
         assigneeProvided &&
@@ -350,6 +355,8 @@ const normalizeTaskInput = body => {
             dueDate,
             chatMessageId,
             descriptionAttachments,
+            sprintIdProvided,
+            sprintId,
             assigneeProvided,
             assigneeFirebaseUid:
                 typeof assigneeFirebaseUid === 'string' && assigneeFirebaseUid.trim()
@@ -379,6 +386,15 @@ const validateProjectTaskAssignee = async (projectId, firebaseUid) => {
             LIMIT 1
         `,
         [projectId, firebaseUid]
+    );
+    return result.rowCount > 0;
+};
+
+const validateProjectTaskSprint = async (projectId, sprintId) => {
+    if (!sprintId) return true;
+    const result = await query(
+        `SELECT 1 FROM project_sprints WHERE project_id = $1 AND sprint_id = $2::uuid LIMIT 1`,
+        [projectId, sprintId]
     );
     return result.rowCount > 0;
 };
@@ -525,7 +541,10 @@ const validateTaskProjectTimeline = (project, task) => {
     const taskStartDate = task.startDate;
     const taskDueDate = task.dueDate;
     const sprint = Array.isArray(project.sprints)
-        ? project.sprints.find(item => ['active', 'in progress'].includes(String(item?.status || '').toLowerCase()))
+        ? project.sprints.find(
+            item => task.sprintId &&
+                String(item?.id || item?.sprintId || '') === String(task.sprintId)
+        ) || project.sprints.find(item => ['active', 'in progress'].includes(String(item?.status || '').toLowerCase()))
             || project.sprints[0]
         : null;
     const sprintDueDate = toProjectDateKey(
@@ -540,7 +559,7 @@ const validateTaskProjectTimeline = (project, task) => {
         (taskDueDate && sprintDueDate && taskDueDate > sprintDueDate)
     ) {
         if (taskDueDate && sprintDueDate && taskDueDate > sprintDueDate) {
-            return `Task due date must be on or before the active sprint deadline (${sprintDueDate}).`;
+            return `Task due date must be on or before the sprint deadline (${sprintDueDate}).`;
         }
         return `Task dates must fall within the project timeline (${projectStartDate || 'any start date'} to ${projectDueDate || 'any due date'}).`;
     }
@@ -550,6 +569,15 @@ const validateTaskProjectTimeline = (project, task) => {
 
 const getProjectTasks = async (req, res) => {
     try {
+        const sprintId = req.query.sprintId || null;
+        if (sprintId !== null && (typeof sprintId !== 'string' || !uuidPattern.test(sprintId))) {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_SPRINT_ID',
+                message: 'Sprint ID is invalid.'
+            });
+        }
+
         const project = await getProjectAndCheckAccess(req.params.projectId, req.firebaseUid);
         if (!project) {
             return res.status(404).json({
@@ -564,6 +592,8 @@ const getProjectTasks = async (req, res) => {
                 SELECT
                     t.task_id,
                     t.project_id,
+                    t.sprint_id::text AS sprint_id,
+                    assigned_sprint.name AS sprint,
                     p.name AS project_name,
                     t.title,
                     t.description,
@@ -611,6 +641,8 @@ const getProjectTasks = async (req, res) => {
                     t.updated_at
                 FROM project_tasks t
                 JOIN projects p ON p.project_id = t.project_id
+                LEFT JOIN project_sprints assigned_sprint
+                  ON assigned_sprint.sprint_id = t.sprint_id
                 LEFT JOIN user_profiles assignee
                   ON assignee.firebase_uid = t.assignee_firebase_uid
                 LEFT JOIN messages context_message
@@ -657,6 +689,7 @@ const getProjectTasks = async (req, res) => {
                       )
                 ) dependencies ON TRUE
                 WHERE t.project_id = $1
+                  AND ($4::uuid IS NULL OR t.sprint_id = $4::uuid)
                   AND (
                     $3::boolean = FALSE
                     OR p.creator_firebase_uid = $2
@@ -681,7 +714,7 @@ const getProjectTasks = async (req, res) => {
                   )
                 ORDER BY t.created_at, t.title
             `,
-            [project.project_id, req.firebaseUid, req.query.assignedToMe === 'true']
+            [project.project_id, req.firebaseUid, req.query.assignedToMe === 'true', sprintId]
         );
         return res.status(200).json({
             success: true,
@@ -715,7 +748,8 @@ const getProjectTaskDetails = async (req, res) => {
             });
         }
         const result = await query(
-            `SELECT task.task_id, task.project_id, task.title, task.description,
+            `SELECT task.task_id, task.project_id, task.sprint_id::text AS sprint_id,
+                    assigned_sprint.name AS sprint, task.title, task.description,
                     task.category, task.tags,
                     task.task_submission_status, task.task_submission_note,
                     task.task_submission_links, task.task_submitted_at,
@@ -745,6 +779,8 @@ const getProjectTaskDetails = async (req, res) => {
                     task.created_at, task.updated_at
              FROM project_tasks task
                          JOIN projects project ON project.project_id = task.project_id
+                         LEFT JOIN project_sprints assigned_sprint
+                             ON assigned_sprint.sprint_id = task.sprint_id
                          LEFT JOIN user_profiles assignee
                              ON assignee.firebase_uid = task.assignee_firebase_uid
                          LEFT JOIN messages message
@@ -1404,6 +1440,13 @@ const createProjectTask = async (req, res) => {
                 message: 'New project tasks must start in To do.'
             });
         }
+        if (!(await validateProjectTaskSprint(project.project_id, normalized.value.sprintId))) {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_TASK_SPRINT',
+                message: 'Choose a sprint in this project.'
+            });
+        }
         const timelineError = validateTaskProjectTimeline(project, normalized.value);
         if (timelineError) {
             return res.status(400).json({
@@ -1438,9 +1481,9 @@ const createProjectTask = async (req, res) => {
                     task_id, project_id, title, description, category,
                     status, start_date, due_date,
                     created_by_firebase_uid, chat_message_id, description_attachments,
-                    priority, tags, assignee_firebase_uid
+                    priority, tags, assignee_firebase_uid, sprint_id
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $11::jsonb, $12, $13::jsonb, $14)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $11::jsonb, $12, $13::jsonb, $14, $15::uuid)
                 RETURNING task_id
             `,
             [
@@ -1457,7 +1500,8 @@ const createProjectTask = async (req, res) => {
                 JSON.stringify(normalized.value.descriptionAttachments),
                 normalized.value.priority,
                 JSON.stringify(normalized.value.tags),
-                normalized.value.assigneeFirebaseUid
+                normalized.value.assigneeFirebaseUid,
+                normalized.value.sprintId
             ]
         );
 
@@ -1499,6 +1543,16 @@ const updateProjectTask = async (req, res) => {
                 success: false,
                 code: 'PROJECT_NOT_FOUND',
                 message: 'Project not found or you are not its creator.'
+            });
+        }
+        if (
+            normalized.value.sprintIdProvided &&
+            !(await validateProjectTaskSprint(project.project_id, normalized.value.sprintId))
+        ) {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_TASK_SPRINT',
+                message: 'Choose a sprint in this project.'
             });
         }
         const timelineError = validateTaskProjectTimeline(project, normalized.value);
@@ -1574,9 +1628,10 @@ const updateProjectTask = async (req, res) => {
                     description_attachments = $9::jsonb,
                     tags = CASE WHEN $10::boolean THEN $11::jsonb ELSE tags END,
                     assignee_firebase_uid = CASE WHEN $12::boolean THEN $13 ELSE assignee_firebase_uid END,
+                    sprint_id = CASE WHEN $14::boolean THEN $15::uuid ELSE sprint_id END,
                     updated_at = NOW()
-                WHERE project_id = $14
-                  AND task_id = $15::uuid
+                WHERE project_id = $16
+                  AND task_id = $17::uuid
                   AND (
                     $4 <> 'Done'
                     OR project_tasks.task_submission_status = 'Completed'
@@ -1597,6 +1652,8 @@ const updateProjectTask = async (req, res) => {
                 JSON.stringify(normalized.value.tags),
                 normalized.value.assigneeProvided,
                 normalized.value.assigneeFirebaseUid,
+                normalized.value.sprintIdProvided,
+                normalized.value.sprintId,
                 project.project_id,
                 req.params.taskId
             ]

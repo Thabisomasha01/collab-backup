@@ -54,6 +54,11 @@ export interface CollabToolSettings {
   twoFactor: boolean;
 }
 
+export interface SelectedSprintView {
+  projectId: string;
+  sprint: ProjectSprint;
+}
+
 export const defaultCollabSettings: CollabToolSettings = {
   collabSync: true,
   calendarPins: true,
@@ -253,7 +258,9 @@ export function normalizeTaskRecord(task: any, project: Project): TaskItem {
     priority,
     done: status === 'Done',
     progress: status === 'Done' ? 100 : status === 'In progress' ? 50 : 0,
-    sprint: task.sprint || '',
+    sprint: task.sprint || task.sprint_name || '',
+    sprintId: task.sprint_id || task.sprintId || '',
+    sprint_id: task.sprint_id || task.sprintId || '',
     sprintMembers,
     assigneeFirebaseUid: task.assignee_firebase_uid || task.assigneeFirebaseUid || null,
     assignee_firebase_uid: task.assignee_firebase_uid || task.assigneeFirebaseUid || null,
@@ -555,6 +562,7 @@ export interface DashboardContextValue {
   activeProject: Project | undefined;
   isCurrentUserProjectCreator: boolean;
   loadProjectsFromAPI: (opts?: { silent?: boolean }) => Promise<Project[]>;
+  loadProjectSprints: (projectId: string) => Promise<ProjectSprint[]>;
 
   tasks: TaskItem[];
   accessibleTasks: TaskItem[];
@@ -613,6 +621,9 @@ export interface DashboardContextValue {
   selectedTaskViewId: string | number | null;
   openFullTaskView: (taskId: string | number, projectName?: string) => void;
   closeFullTaskView: () => void;
+  selectedSprintView: SelectedSprintView | null;
+  openFullSprintView: (sprint: ProjectSprint, projectId: string, projectName: string) => void;
+  closeFullSprintView: () => void;
 
   activeModal: ActiveModalState;
   setActiveModal: React.Dispatch<React.SetStateAction<ActiveModalState>>;
@@ -728,6 +739,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const [asideTaskId, setAsideTaskId] = useState<string | number | null>(null);
   const [selectedTaskViewId, setSelectedTaskViewId] = useState<string | number | null>(null);
+  const [selectedSprintView, setSelectedSprintView] = useState<SelectedSprintView | null>(null);
   const [activeModal, setActiveModal] = useState<ActiveModalState>({ type: null });
   const [confirmationState, setConfirmationState] = useState<ConfirmationModalState>({
     isOpen: false,
@@ -937,6 +949,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const resolved = viewName === 'Calendar' ? 'Meetings' : viewName;
     setActiveView(resolved);
     setSelectedTaskViewId(null);
+    setSelectedSprintView(null);
     setActiveSprintFilter('all');
     setMobileSidebarOpen(false);
   }, []);
@@ -964,6 +977,21 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     },
     []
   );
+
+  const loadProjectSprints = useCallback(async (projectId: string): Promise<ProjectSprint[]> => {
+    const response = await api.get(`/projects/${encodeURIComponent(projectId)}/sprints`);
+    const sprints = response?.data?.sprints;
+    if (!Array.isArray(sprints)) {
+      throw new Error('The server returned an invalid project sprints response.');
+    }
+
+    setProjects((current) =>
+      current.map((project) =>
+        project.projectId === projectId ? { ...project, sprints } : project
+      )
+    );
+    return sprints;
+  }, []);
 
   const loadAllProjectTasks = useCallback(
     async (projectList?: Project[]): Promise<TaskItem[]> => {
@@ -1580,6 +1608,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const openFullTaskView = useCallback(
     (taskId: string | number, projectName?: string) => {
       setAsideTaskId(null);
+      setSelectedSprintView(null);
       if (projectName) {
         setActiveView(projectName);
       } else {
@@ -1605,6 +1634,21 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const closeFullTaskView = useCallback(() => {
     setSelectedTaskViewId(null);
+  }, []);
+
+  const openFullSprintView = useCallback(
+    (sprint: ProjectSprint, projectId: string, projectName: string) => {
+      setAsideTaskId(null);
+      setSelectedTaskViewId(null);
+      setSelectedSprintView({ projectId, sprint });
+      setActiveView(projectName);
+      setMobileSidebarOpen(false);
+    },
+    []
+  );
+
+  const closeFullSprintView = useCallback(() => {
+    setSelectedSprintView(null);
   }, []);
 
   const closeModal = useCallback(() => {
@@ -2023,6 +2067,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     activeProject,
     isCurrentUserProjectCreator,
     loadProjectsFromAPI,
+    loadProjectSprints,
     tasks,
     accessibleTasks,
     setTasks,
@@ -2070,6 +2115,9 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     selectedTaskViewId,
     openFullTaskView,
     closeFullTaskView,
+    selectedSprintView,
+    openFullSprintView,
+    closeFullSprintView,
     activeModal,
     setActiveModal,
     closeModal,

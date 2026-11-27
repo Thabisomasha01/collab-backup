@@ -26,6 +26,7 @@ import type {
   TaskAttachment,
   TaskComment,
   TaskItem,
+  TaskPriority,
   TaskSubtask
 } from '../../types/taskViewer';
 import { PersonAvatar } from './PersonAvatar';
@@ -33,7 +34,7 @@ import styles from './TaskDetails.module.css';
 
 type TaskViewerTab = 'overview' | 'list' | 'board' | 'calendar' | 'files';
 type DueFilterKey = 'all' | 'march17' | 'overdue' | 'unscheduled';
-type PriorityFilterKey = 'all' | 'high' | 'normal' | 'low';
+type PriorityFilterKey = 'all' | TaskPriority;
 type ToolbarDropdown = 'due' | 'assignee' | 'priority' | 'advance' | null;
 
 export interface TaskDetailsProps {
@@ -56,9 +57,10 @@ const BOARD_COLUMNS: Array<{
   status: BoardColumnStatus;
   toneClass: string;
 }> = [
-    { status: 'Pending', toneClass: 'tone-pending' },
+    { status: 'To do', toneClass: 'tone-todo' },
     { status: 'In Progress', toneClass: 'tone-in-progress' },
-    { status: 'Completed', toneClass: 'tone-completed' },
+    { status: 'Pending', toneClass: 'tone-pending' },
+    { status: 'Done', toneClass: 'tone-done' },
     { status: 'Launched', toneClass: 'tone-launched' }
   ];
 
@@ -118,7 +120,7 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
   const [dragOverColumn, setDragOverColumn] = useState<BoardColumnStatus | null>(null);
   const [creatingInColumn, setCreatingInColumn] = useState<BoardColumnStatus | null>(null);
   const [newCardTitle, setNewCardTitle] = useState<string>('');
-  const [newCardPriority, setNewCardPriority] = useState<'normal' | 'high' | 'low'>('normal');
+  const [newCardPriority, setNewCardPriority] = useState<TaskPriority>('medium');
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
@@ -126,6 +128,13 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
   useEffect(() => {
     setBoardItems(task?.boardItems || []);
   }, [task?.id, task?.title, task?.boardItems]);
+
+  useEffect(() => {
+    setDueFilter('all');
+    setAssigneeFilter('all');
+    setPriorityFilter('all');
+    setStatusFilter('all');
+  }, [task?.id]);
 
   useEffect(() => {
     const handleDocClick = (event: MouseEvent) => {
@@ -286,11 +295,13 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
   const priorityFilterLabel =
     priorityFilter === 'all'
       ? 'All'
-      : priorityFilter === 'high'
-        ? 'High'
-        : priorityFilter === 'normal'
-          ? 'Normal'
-          : 'Low';
+      : {
+          none: 'No Priority',
+          low: 'Low',
+          medium: 'Medium',
+          high: 'High',
+          urgent: 'Urgent'
+        }[priorityFilter];
 
   const moveBoardCard = (cardId: string, nextStatus: BoardColumnStatus) => {
     setBoardItems((prev) =>
@@ -300,7 +311,7 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
             ...card,
             status: nextStatus,
             progress:
-              nextStatus === 'Completed' || nextStatus === 'Launched'
+              nextStatus === 'Done' || nextStatus === 'Launched'
                 ? 100
                 : nextStatus === 'In Progress'
                   ? card.progress || 45
@@ -364,32 +375,42 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
   };
 
   const renderColumnStatusIcon = (status: BoardColumnStatus) => {
-    if (status === 'Pending') return <Circle size={12} strokeWidth={2.2} />;
     if (status === 'In Progress') return <Clock size={12} strokeWidth={2.2} />;
-    return <CheckCircle2 size={12} strokeWidth={2.2} />;
+    if (status === 'Done' || status === 'Launched') {
+      return <CheckCircle2 size={12} strokeWidth={2.2} />;
+    }
+    return <Circle size={12} strokeWidth={2.2} />;
   };
 
-  const renderPriorityFlag = (priority?: 'high' | 'normal' | 'low' | '') => {
-    if (!priority) {
+  const renderPriorityFlag = (priority?: TaskPriority | '') => {
+    if (!priority || priority === 'none') {
       return (
         <>
-          <Flag size={13} strokeWidth={1.8} className={styles['card-priority-flag']} />
-          <span className={styles['card-meta-empty']}>-</span>
+          <Flag
+            size={13}
+            strokeWidth={1.8}
+            className={`${styles['card-priority-flag']} ${styles['is-none']}`}
+          />
+          <span className={`${styles['card-priority-text']} ${styles['is-none']}`}>
+            No Priority
+          </span>
         </>
       );
     }
-    const label =
-      priority === 'high'
-        ? 'High Priority'
-        : priority === 'low'
-          ? 'Low Priority'
-          : 'Normal Priority';
-    const flagClass =
-      priority === 'high'
-        ? styles['is-high']
-        : priority === 'low'
-          ? styles['is-low']
-          : styles['is-normal'];
+    const labels: Record<TaskPriority, string> = {
+      none: 'No Priority',
+      low: 'Low',
+      medium: 'Medium',
+      high: 'High',
+      urgent: 'Urgent'
+    };
+    const priorityClasses: Record<TaskPriority, string> = {
+      none: styles['is-none'],
+      low: styles['is-low'],
+      medium: styles['is-medium'],
+      high: styles['is-high'],
+      urgent: styles['is-urgent']
+    };
 
     return (
       <>
@@ -397,9 +418,11 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
           size={13}
           strokeWidth={2}
           fill="currentColor"
-          className={`${styles['card-priority-flag']} ${flagClass}`}
+          className={`${styles['card-priority-flag']} ${priorityClasses[priority]}`}
         />
-        <span className={styles['card-priority-text']}>{label}</span>
+        <span className={`${styles['card-priority-text']} ${priorityClasses[priority]}`}>
+          {labels[priority]}
+        </span>
       </>
     );
   };
@@ -532,9 +555,11 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
               {(
                 [
                   ['all', 'All'],
-                  ['high', 'High Priority'],
-                  ['normal', 'Normal Priority'],
-                  ['low', 'Low Priority']
+                  ['none', 'No Priority'],
+                  ['low', 'Low'],
+                  ['medium', 'Medium'],
+                  ['high', 'High'],
+                  ['urgent', 'Urgent']
                 ] as const
               ).map(([key, label]) => (
                 <button
@@ -855,7 +880,7 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
                   aria-hidden="true"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 24 24" focusable="false">
-                    <path fill="currentColor" d="M12 14c2.764 0 5-2.238 5-5s-2.236-5-5-5s-5 2.238-5 5s2.236 5 5 5m0-8c1.654 0 3 1.346 3 3s-1.346 3-3 3s-3-1.346-3-3s1.346-3 3-3m8 9a2.5 2.5 0 1 0 0-5a2.5 2.5 0 0 0 0 5m0-4c.827 0 1.5.673 1.5 1.5S20.827 14 20 14s-1.5-.673-1.5-1.5s.673-1.5 1.5-1.5m0 4.59c-1.331 0-2.332.406-2.917.969C15.968 15.641 14.205 15 12 15c-2.266 0-3.995.648-5.092 1.564c-.596-.565-1.608-.975-2.908-.975c-2.188 0-3.5 1.091-3.5 2.183c0 .545 1.312 1.092 3.5 1.092c.604 0 1.146-.051 1.623-.133l-.04.27c0 1 2.405 2 6.417 2c3.762 0 6.417-1 6.417-2l-.021-.255c.463.073.996.118 1.604.118c2.051 0 3.5-.547 3.5-1.092c0-1.092-1.373-2.182-3.5-2.182M4 17.863c-1.309 0-2.068-.207-2.417-.354c.239-.405 1.003-.92 2.417-.92c1.107 0 1.837.351 2.208.706l-.235.344c-.452.119-1.108.224-1.973.224M12 19c-2.163 0-3.501-.312-4.184-.561C8.337 17.761 9.734 17 12 17c2.169 0 3.59.761 4.148 1.425c-.755.27-2.162.575-4.148.575m8-1.137c-.914 0-1.546-.103-1.973-.213a3 3 0 0 0-.248-.375c.356-.345 1.071-.685 2.221-.685c1.324 0 2.141.501 2.404.911c-.39.163-1.205.362-2.404.362M4 15a2.5 2.5 0 1 0 0-5a2.5 2.5 0 0 0 0 5m0-4c.827 0 1.5.673 1.5 1.5S4.827 14 4 14s-1.5-.673-1.5-1.5S3.173 11 4 11" />
+                    <path fill="currentColor" d="M9.175 10.825Q8 9.65 8 8t1.175-2.825T12 4t2.825 1.175T16 8t-1.175 2.825T12 12t-2.825-1.175M4 20v-2.8q0-.85.438-1.562T5.6 14.55q1.55-.775 3.15-1.162T12 13t3.25.388t3.15 1.162q.725.375 1.163 1.088T20 17.2V20z" />
                   </svg>
                   <span className={styles['quick-action-plus-badge']}>+</span>
                 </span>
@@ -1183,12 +1208,14 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
                     <select
                       value={newCardPriority}
                       onChange={(e) =>
-                        setNewCardPriority(e.target.value as 'normal' | 'high' | 'low')
+                        setNewCardPriority(e.target.value as TaskPriority)
                       }
                     >
-                      <option value="normal">Normal Priority</option>
-                      <option value="high">High Priority</option>
-                      <option value="low">Low Priority</option>
+                      <option value="none">No Priority</option>
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="urgent">Urgent</option>
                     </select>
                     <button type="submit" className={styles['inline-subtask-save']}>
                       Add
@@ -1229,7 +1256,7 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
                     ) : (
                       filteredBoardItems.map((item) => {
                         const isCompleted =
-                          item.status === 'Completed' || item.status === 'Launched';
+                          item.status === 'Done' || item.status === 'Launched';
                         const colCfg = BOARD_COLUMNS.find((c) => c.status === item.status);
 
                         return (
@@ -1241,7 +1268,7 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
                                   }`}
                                 aria-label={`Toggle ${item.title}`}
                                 onClick={() =>
-                                  moveBoardCard(item.id, isCompleted ? 'Pending' : 'Completed')
+                                  moveBoardCard(item.id, isCompleted ? 'To do' : 'Done')
                                 }
                               >
                                 {isCompleted && <Check size={11} strokeWidth={2.5} />}
@@ -1391,12 +1418,14 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
                             <select
                               value={newCardPriority}
                               onChange={(e) =>
-                                setNewCardPriority(e.target.value as 'normal' | 'high' | 'low')
+                                setNewCardPriority(e.target.value as TaskPriority)
                               }
                             >
-                              <option value="normal">Normal Priority</option>
-                              <option value="high">High Priority</option>
-                              <option value="low">Low Priority</option>
+                              <option value="none">No Priority</option>
+                              <option value="low">Low</option>
+                              <option value="medium">Medium</option>
+                              <option value="high">High</option>
+                              <option value="urgent">Urgent</option>
                             </select>
                             <button type="submit" className={styles['inline-subtask-save']}>
                               Add

@@ -18,11 +18,13 @@ export interface ProjectOverviewProps {
   allProjects?: Project[];
   tasks: TaskItem[];
   allTasks?: TaskItem[];
+  sprintsLoading?: boolean;
+  sprintsLoadError?: string;
+  onRetrySprints?: () => void;
   canViewTaskMetrics: boolean;
   onSelectProject?: (projectId: string) => void;
   onOpenProgressAside: (taskId: string | number) => void;
   onToggleTaskDone: (taskId: string | number) => void;
-  onAddTask?: (projectId: string, title: string) => void;
   onCreateSprint?: (projectId: string) => void;
 }
 
@@ -71,15 +73,16 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
   allProjects,
   tasks,
   canViewTaskMetrics,
+  sprintsLoading = false,
+  sprintsLoadError = '',
+  onRetrySprints,
   onOpenProgressAside,
   onToggleTaskDone,
-  onAddTask,
   onCreateSprint
 }) => {
   const [taskFilter, setTaskFilter] = useState<'all' | 'pending'>('all');
   const [timeframe, setTimeframe] = useState<'Weekly' | 'Monthly'>('Weekly');
   const [activityTab, setActivityTab] = useState<'all' | 'unread' | 'mentions'>('all');
-  const [newTaskTitle, setNewTaskTitle] = useState<string>('');
   const [spotlightOffset, setSpotlightOffset] = useState<number>(0);
   const [dismissedActivityIds, setDismissedActivityIds] = useState<Record<string, boolean>>({});
 
@@ -197,14 +200,6 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
       val: Number(Math.min(8, counts[idx] * multiplier).toFixed(1))
     }));
   }, [tasks, timeframe]);
-
-  const handleQuickAddSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = newTaskTitle.trim();
-    if (!trimmed) return;
-    onAddTask?.(project.projectId, trimmed);
-    setNewTaskTitle('');
-  };
 
   return (
     <div className={styles['overview-canvas']}>
@@ -328,17 +323,6 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
                             </span>
                           ))}
                         </div>
-                        <button
-                          type="button"
-                          className={styles['team-add-btn']}
-                          title="Assign team member"
-                          aria-label="Assign team member"
-                          onClick={() =>
-                            document.getElementById('overview-add-task-input')?.focus()
-                          }
-                        >
-                          <Plus size={12} strokeWidth={2.6} />
-                        </button>
                       </div>
                     </div>
 
@@ -348,7 +332,66 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
             </div>
           </section>
 
-          {/* Bottom Split: Task Progress + Recent Tasks */}
+          <section className={`${styles['panel-card']} ${styles['project-sprints']}`} id="project-sprints">
+            <div className={styles['panel-head']}>
+              <div>
+                <h2 className={styles['section-heading']}>Project Sprints</h2>
+                <span className={styles['project-sprints-count']}>
+                  {project.sprints.length} planned
+                </span>
+              </div>
+            </div>
+            {sprintsLoading ? (
+              <div className={styles['empty-state-box']} role="status">
+                Loading project sprints…
+              </div>
+            ) : sprintsLoadError ? (
+              <div className={styles['sprints-error']} role="alert">
+                <span>{sprintsLoadError}</span>
+                {onRetrySprints && (
+                  <button type="button" onClick={onRetrySprints}>
+                    Retry
+                  </button>
+                )}
+              </div>
+            ) : project.sprints.length === 0 ? (
+              <div className={styles['empty-state-box']}>No sprints in this project yet.</div>
+            ) : (
+              <div className={styles['project-sprints-list']}>
+                {project.sprints.map((sprint) => {
+                  const startDate = sprint.startDate || sprint.start_date;
+                  const dueDate =
+                    sprint.dueDate || sprint.due_date || sprint.endDate || sprint.end_date;
+
+                  return (
+                    <article
+                      className={styles['project-sprint-card']}
+                      key={sprint.id || sprint.sprintId || sprint.name}
+                    >
+                      <div className={styles['project-sprint-card-heading']}>
+                        <h3>{sprint.name}</h3>
+                        <span>{sprint.status || 'Upcoming'}</span>
+                      </div>
+                      {sprint.description && (
+                        <p className={styles['project-sprint-description']}>
+                          {sprint.description}
+                        </p>
+                      )}
+                      {(startDate || dueDate) && (
+                        <p className={styles['project-sprint-dates']}>
+                          {startDate ? `Starts ${String(startDate).slice(0, 10)}` : ''}
+                          {startDate && dueDate ? ' · ' : ''}
+                          {dueDate ? `Due ${String(dueDate).slice(0, 10)}` : ''}
+                        </p>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          {/* Bottom Split: Task Progress + Recent  Tasks */}
           <div className={styles['bottom-split-grid']}>
             {/* Task Progress Card */}
             {canViewTaskMetrics && (
@@ -443,7 +486,7 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
                   <div className={styles['empty-state-box']}>
                     {taskFilter === 'pending'
                       ? 'All tasks in this project are completed.'
-                      : 'No tasks in this project yet. Add one below.'}
+                      : 'No tasks in this project yet.'}
                   </div>
                 ) : (
                   visibleTasks.map((task) => {
@@ -520,20 +563,6 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
                 )}
               </div>
 
-              <form className={styles['add-subtask-bar']} onSubmit={handleQuickAddSubmit}>
-                <div className={styles['add-subtask-inner']}>
-                  <input
-                    id="overview-add-task-input"
-                    type="text"
-                    placeholder="Add new task"
-                    value={newTaskTitle}
-                    onChange={(e) => setNewTaskTitle(e.target.value)}
-                  />
-                  <button type="submit" aria-label="Add new task">
-                    <Plus size={15} strokeWidth={2.5} />
-                  </button>
-                </div>
-              </form>
             </section>
 
             <aside
