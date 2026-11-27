@@ -1937,7 +1937,8 @@ const updateProjectTaskStatus = async (req, res) => {
 
         const existingTask = await query(
             `
-                SELECT task_id, status, title, task_submission_status
+                SELECT task_id, status, title, task_submission_status,
+                       assignee_firebase_uid
                 FROM project_tasks
                 WHERE project_id = $1
                   AND task_id = $2::uuid
@@ -1952,17 +1953,15 @@ const updateProjectTaskStatus = async (req, res) => {
                 message: 'Task not found.'
             });
         }
-        const isProjectOwner = project.creator_firebase_uid === req.firebaseUid;
-        const isProjectSprintMember = projectSprintMemberUids(project).includes(req.firebaseUid);
-        if (!isProjectOwner && !isProjectSprintMember) {
+        const task = existingTask.rows[0];
+        if (task.assignee_firebase_uid !== req.firebaseUid) {
             return res.status(403).json({
                 success: false,
                 code: 'TASK_STATUS_UPDATE_FORBIDDEN',
-                message: 'Only the project owner or a project sprint member can move it.'
+                message: 'Only the user assigned to this task can move it.'
             });
         }
 
-        const task = existingTask.rows[0];
         if (status === 'Done' && task.task_submission_status !== 'Completed') {
             return res.status(409).json({
                 success: false,
