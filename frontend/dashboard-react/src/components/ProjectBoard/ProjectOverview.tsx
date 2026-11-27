@@ -159,6 +159,9 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
   const completedCount = tasks.filter((t) => t.status === 'Done').length;
   const inProgressCount = tasks.filter((t) => t.status === 'In progress').length;
   const todoCount = tasks.filter((t) => t.status === 'To do' || t.status === 'Backlog').length;
+  const projectProgress = tasks.length
+    ? Math.round((completedCount / tasks.length) * 100)
+    : 0;
   const todayKey = new Date().toISOString().slice(0, 10);
   const dueSoonLimit = new Date(`${todayKey}T00:00:00Z`);
   dueSoonLimit.setUTCDate(dueSoonLimit.getUTCDate() + 7);
@@ -250,8 +253,8 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
 
   const chartData = useMemo(() => {
     const counts = [0, 0, 0, 0, 0, 0, 0];
-    tasks.forEach((t, index) => {
-      const raw = t.updatedAt || t.createdAt || t.due_date || t.date;
+    tasks.forEach((task, index) => {
+      const raw = task.updatedAt || task.createdAt || task.due_date || task.date;
       let dayIdx = index % 7;
       if (raw) {
         const parsed = new Date(raw);
@@ -260,12 +263,12 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
           dayIdx = jsDay === 0 ? 6 : jsDay - 1;
         }
       }
-      counts[dayIdx] += t.status === 'Done' ? 2 : t.status === 'In progress' ? 1.5 : 1;
+      counts[dayIdx] += task.status === 'Done' ? 2 : task.status === 'In progress' ? 1.5 : 1;
     });
     const multiplier = timeframe === 'Monthly' ? 1.25 : 1;
-    return DAY_LABELS.map((day, idx) => ({
+    return DAY_LABELS.map((day, index) => ({
       day,
-      val: Number(Math.min(8, counts[idx] * multiplier).toFixed(1))
+      val: Number(Math.min(8, counts[index] * multiplier).toFixed(1))
     }));
   }, [tasks, timeframe]);
 
@@ -317,50 +320,64 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
               </div>
             )}
             {canViewTaskMetrics && (
-              <section className={styles['kpi-grid']} aria-label="Project Metrics">
-                <div className={styles['kpi-card']}>
-                  <div className={styles['kpi-count-row']}>
-                    <AnimatedMetric value={tasks.length} />
-                    <AnimatedAnalyticsGraphic />
+              <div className={styles['kpi-groups']}>
+                <section className={styles['kpi-group']} aria-label="Task status metrics">
+                  <h2 className={styles['kpi-group-heading']}>
+                    Task status
+                  </h2>
+                  <div className={`${styles['kpi-grid']} ${styles['kpi-grid-status']}`}>
+                    <div className={`${styles['kpi-card']} ${styles['kpi-card-total']}`}>
+                      <div className={styles['kpi-count-row']}>
+                        <AnimatedMetric value={tasks.length} />
+                        <AnimatedAnalyticsGraphic />
+                      </div>
+                      <span className={styles['kpi-label']}>Total tasks</span>
+                    </div>
+                    <div className={`${styles['kpi-card']} ${styles['kpi-card-pending']}`}>
+                      <div className={styles['kpi-count-row']}>
+                        <AnimatedMetric value={todoCount} />
+                        <AnimatedAnalyticsGraphic variant="pending" />
+                      </div>
+                      <span className={styles['kpi-label']}>Pending tasks</span>
+                    </div>
+                    <div className={`${styles['kpi-card']} ${styles['kpi-card-in-progress']}`}>
+                      <div className={styles['kpi-count-row']}>
+                        <AnimatedMetric value={inProgressCount} />
+                        <AnimatedAnalyticsGraphic variant="in-progress" />
+                      </div>
+                      <span className={styles['kpi-label']}>In progress</span>
+                    </div>
+                    <div className={`${styles['kpi-card']} ${styles['kpi-card-complete']}`}>
+                      <div className={styles['kpi-count-row']}>
+                        <AnimatedMetric value={completedCount} />
+                        <AnimatedAnalyticsGraphic variant="complete" />
+                      </div>
+                      <span className={styles['kpi-label']}>Complete tasks</span>
+                    </div>
                   </div>
-                  <span className={styles['kpi-label']}>Total tasks</span>
-                </div>
-                <div className={styles['kpi-card']}>
-                  <div className={styles['kpi-count-row']}>
-                    <AnimatedMetric value={todoCount} />
-                    <AnimatedAnalyticsGraphic variant="pending" />
+                </section>
+                <section className={styles['kpi-group']} aria-label="Schedule metrics">
+                  <h2 className={styles['kpi-group-heading']}>
+                    Schedule
+                  </h2>
+                  <div className={`${styles['kpi-grid']} ${styles['kpi-grid-schedule']}`}>
+                    <div className={`${styles['kpi-card']} ${styles['kpi-card-overdue']}`}>
+                      <div className={styles['kpi-count-row']}>
+                        <AnimatedMetric value={overdueCount} />
+                        <AnimatedAnalyticsGraphic variant="overdue" />
+                      </div>
+                      <span className={styles['kpi-label']}>Overdue tasks</span>
+                    </div>
+                    <div className={`${styles['kpi-card']} ${styles['kpi-card-due-soon']}`}>
+                      <div className={styles['kpi-count-row']}>
+                        <AnimatedMetric value={dueSoonCount} />
+                        <AnimatedAnalyticsGraphic variant="due-soon" />
+                      </div>
+                      <span className={styles['kpi-label']}>Due soon</span>
+                    </div>
                   </div>
-                  <span className={styles['kpi-label']}>Pending tasks</span>
-                </div>
-                <div className={styles['kpi-card']}>
-                  <div className={styles['kpi-count-row']}>
-                    <AnimatedMetric value={inProgressCount} />
-                    <AnimatedAnalyticsGraphic variant="in-progress" />
-                  </div>
-                  <span className={styles['kpi-label']}>In progress</span>
-                </div>
-                <div className={styles['kpi-card']}>
-                  <div className={styles['kpi-count-row']}>
-                    <AnimatedMetric value={completedCount} />
-                    <AnimatedAnalyticsGraphic variant="complete" />
-                  </div>
-                  <span className={styles['kpi-label']}>Complete tasks</span>
-                </div>
-                <div className={styles['kpi-card']}>
-                  <div className={styles['kpi-count-row']}>
-                    <AnimatedMetric value={overdueCount} />
-                    <AnimatedAnalyticsGraphic variant="overdue" />
-                  </div>
-                  <span className={styles['kpi-label']}>Overdue tasks</span>
-                </div>
-                <div className={styles['kpi-card']}>
-                  <div className={styles['kpi-count-row']}>
-                    <AnimatedMetric value={dueSoonCount} />
-                    <AnimatedAnalyticsGraphic variant="due-soon" />
-                  </div>
-                  <span className={styles['kpi-label']}>Due soon</span>
-                </div>
-              </section>
+                </section>
+              </div>
             )}
           </div>
 
@@ -444,7 +461,7 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
                     className={styles['select-pill']}
                     value={timeframe}
                     aria-label="Select progress timeframe"
-                    onChange={(e) => setTimeframe(e.target.value as 'Weekly' | 'Monthly')}
+                    onChange={(event) => setTimeframe(event.target.value as 'Weekly' | 'Monthly')}
                   >
                     <option value="Weekly">Weekly</option>
                     <option value="Monthly">Monthly</option>
@@ -452,18 +469,24 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
                 </div>
 
                 <div className={styles['progress-panel-body']}>
-                  <div className={styles['progress-metrics-row']}>
-                    <div className={styles['progress-metric']}>
-                      <strong>{completedCount}</strong>
-                      <span>Completed</span>
+                  <div className={styles['progress-completion']}>
+                    <div className={styles['progress-completion-heading']}>
+                      <span>Progress</span>
+                      <strong>{projectProgress}%</strong>
                     </div>
-                    <div className={styles['progress-metric']}>
-                      <strong>{inProgressCount}</strong>
-                      <span>In Progress</span>
-                    </div>
-                    <div className={styles['progress-metric']}>
-                      <strong>{todoCount}</strong>
-                      <span>To Do</span>
+                    <div
+                      className={styles['progress-completion-track']}
+                      role="progressbar"
+                      aria-label="Overall project progress"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={projectProgress}
+                    >
+                      <span style={{ width: `${projectProgress}%` }} />
+                      <i
+                        aria-hidden="true"
+                        style={{ left: `${projectProgress}%` }}
+                      />
                     </div>
                   </div>
 
@@ -562,7 +585,10 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
                             </button>
                           </div>
 
-                          <div className={styles['recent-task-card']}>
+                          <div
+                            className={styles['recent-task-card']}
+                            onClick={() => onOpenProgressAside(task.id)}
+                          >
                             <div className={styles['recent-task-card-heading']}>
                               <div className={styles['recent-task-card-title-wrap']}>
                                 <button
@@ -571,7 +597,6 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
                                     isDone ? styles['is-done'] : ''
                                   }`}
                                   title={task.title}
-                                  onClick={() => onOpenProgressAside(task.id)}
                                 >
                                   {task.title}
                                 </button>
@@ -591,7 +616,6 @@ export const ProjectOverview: React.FC<ProjectOverviewProps> = ({
                               <button
                                 type="button"
                                 className={styles['recent-task-open-btn']}
-                                onClick={() => onOpenProgressAside(task.id)}
                               >
                                 <span>Open</span>
                                 <ChevronRight size={12} />

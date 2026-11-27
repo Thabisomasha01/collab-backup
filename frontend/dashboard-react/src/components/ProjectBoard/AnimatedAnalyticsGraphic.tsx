@@ -26,22 +26,23 @@ export const AnimatedAnalyticsGraphic: React.FC<AnimatedAnalyticsGraphicProps> =
     }
   >
     {variant === 'pending' ? (
-      <svg className={styles['graph-icon']} viewBox="0 0 24 24" aria-hidden="true">
-        <title>graph-bar</title>
-        <path
-          fill="currentColor"
-          d="M6 23H2a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1"
-          opacity=".25"
-        />
-        <path
-          fill="currentColor"
-          d="M14 23h-4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v20a1 1 0 0 1-1 1"
-        />
-        <path
-          fill="currentColor"
-          d="M22 23h-4a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1"
-          opacity=".5"
-        />
+      <svg
+        className={styles['graph-icon']}
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+      >
+        <title>workspace-folder</title>
+        <g
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="square"
+          strokeMiterlimit={3.5}
+          strokeWidth={1.5}
+        >
+          <path d="M3 11a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v6.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+          <path d="m6 9l-.75-4.5l5-.75L11 11m3 0l.75-8l5 .75L19 11" />
+        </g>
       </svg>
     ) : variant === 'in-progress' ? (
       <img className={styles['graph-icon']} src="/images/task-in-progress-icon.png" alt="" />

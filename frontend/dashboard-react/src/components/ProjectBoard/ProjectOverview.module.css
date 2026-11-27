@@ -69,11 +69,57 @@
   line-height: 1;
 }
 
+.kpi-groups {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.kpi-group {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%);
+}
+
+.kpi-group:last-child {
+  border-color: #f0e2d4;
+  background: linear-gradient(135deg, #ffffff 0%, #fff7ed 100%);
+}
+
+.kpi-group-heading {
+  margin: 0 0 10px;
+  color: var(--ink-950);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 180px));
-  justify-content: space-between;
-  gap: 5px;
+  gap: 8px;
+}
+
+.kpi-grid-status {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.kpi-grid-status .kpi-card {
+  padding: 9px 10px;
+}
+
+.kpi-grid-status .kpi-count-row > :last-child {
+  transform: translateY(-50%) scale(0.9);
+}
+
+.kpi-grid-status .kpi-label {
+  font-size: 10px;
+}
+
+.kpi-grid-schedule {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .kpi-card {
@@ -104,33 +150,32 @@
   box-shadow: 0 12px 26px rgba(15, 23, 42, 0.11);
 }
 
-.kpi-card:nth-child(1) {
+.kpi-card-total {
   --kpi-accent: #3b82f6;
 }
 
-.kpi-card:nth-child(2) {
+.kpi-card-pending {
   --kpi-accent: #f59e0b;
 }
 
-.kpi-card:nth-child(3) {
+.kpi-card-in-progress {
   --kpi-accent: #06b6d4;
 }
 
-.kpi-card:nth-child(4) {
+.kpi-card-complete {
   --kpi-accent: #22c55e;
 }
 
-.kpi-card:nth-child(5) {
+.kpi-card-overdue {
   --kpi-accent: #ef4444;
 }
 
-.kpi-card:nth-child(6) {
+.kpi-card-due-soon {
   --kpi-accent: #8b5cf6;
 }
 
-.kpi-card:first-child {
-  padding-right: 8px;
-  padding-left: 8px;
+.kpi-card-total {
+  padding-left: 0;
 }
 
 .kpi-count-row {
@@ -510,32 +555,55 @@
   font-weight: 650;
 }
 
-.progress-metrics-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin: 24px 0 20px;
+.progress-completion {
+  margin: 16px 0 20px;
+  padding: 12px;
+  border: 1px solid #e8ebf1;
+  border-radius: 8px;
+  background: #ffffff;
 }
 
-.progress-metric {
+.progress-completion-heading {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--surface-soft);
-}
-
-.progress-metric strong {
-  color: var(--ink-950);
-  font-size: 20px;
-  font-weight: 750;
-}
-
-.progress-metric span {
-  color: var(--ink-500);
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 9px;
+  color: #252b36;
   font-size: 10px;
   font-weight: 650;
+}
+
+.progress-completion-heading strong {
+  color: #495365;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.progress-completion-track {
+  position: relative;
+  height: 6px;
+  overflow: visible;
+  border-radius: 999px;
+  background: #e7eaf0;
+}
+
+.progress-completion-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #315bd6;
+  transition: width 180ms ease;
+}
+
+.progress-completion-track i {
+  position: absolute;
+  top: 0;
+  width: 15px;
+  height: 6px;
+  border: 1px solid #ffffff;
+  border-radius: 999px;
+  background: repeating-linear-gradient(90deg, #315bd6 0 1px, #ffffff 1px 3px);
+  transform: translateX(-50%);
 }
 
 .chart-area {
@@ -1142,8 +1210,20 @@
   }
 
   .kpi-grid {
-    grid-template-columns: repeat(2, minmax(0, 180px));
-    justify-content: space-between;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .kpi-groups {
+    grid-template-columns: 1fr;
+  }
+
+  .kpi-group {
+    padding: 12px;
+  }
+
+  .kpi-group:last-child {
+    margin-top: 0;
+    padding: 12px;
   }
 
   .spotlight-card {
@@ -1176,8 +1256,7 @@
   }
 
   .kpi-grid {
-    grid-template-columns: repeat(2, minmax(0, 180px));
-    justify-content: space-around;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .details-strip-card,
@@ -1201,18 +1280,6 @@
 
   .mini-filter-btn {
     flex: 1;
-  }
-
-  .progress-metrics-row {
-    gap: 5px;
-  }
-
-  .progress-metric {
-    padding: 9px 8px;
-  }
-
-  .progress-metric strong {
-    font-size: 18px;
   }
 
   .recent-task-details {

@@ -619,7 +619,11 @@ export interface DashboardContextValue {
   closeTaskDetails: () => void;
 
   selectedTaskViewId: string | number | null;
-  openFullTaskView: (taskId: string | number, projectName?: string) => void;
+  openFullTaskView: (
+    taskId: string | number,
+    projectName?: string,
+    preserveSprintView?: boolean
+  ) => void;
   closeFullTaskView: () => void;
   selectedSprintView: SelectedSprintView | null;
   openFullSprintView: (sprint: ProjectSprint, projectId: string, projectName: string) => void;
@@ -1606,9 +1610,9 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, []);
 
   const openFullTaskView = useCallback(
-    (taskId: string | number, projectName?: string) => {
+    (taskId: string | number, projectName?: string, preserveSprintView = false) => {
       setAsideTaskId(null);
-      setSelectedSprintView(null);
+      if (!preserveSprintView) setSelectedSprintView(null);
       if (projectName) {
         setActiveView(projectName);
       } else {

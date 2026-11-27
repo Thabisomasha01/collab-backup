@@ -11,8 +11,10 @@ import {
   Kanban,
   List as ListIcon,
   MoreHorizontal,
+  Paperclip,
   Plus,
   SlidersHorizontal,
+  Tag,
   Trash2,
   UserCircle2,
   UserPlus,
@@ -33,6 +35,7 @@ import { PersonAvatar } from './PersonAvatar';
 import styles from './TaskDetails.module.css';
 
 type TaskViewerTab = 'overview' | 'list' | 'board' | 'calendar' | 'files';
+type TaskAsideTab = 'subtasks' | 'comments' | 'activities';
 type DueFilterKey = 'all' | 'march17' | 'overdue' | 'unscheduled';
 type PriorityFilterKey = 'all' | TaskPriority;
 type ToolbarDropdown = 'due' | 'assignee' | 'priority' | 'advance' | null;
@@ -45,8 +48,10 @@ export interface TaskDetailsProps {
   error?: string;
   onRetry?: () => void;
   onClose?: () => void;
+  asideMode?: boolean;
   isProjectOwner?: boolean;
   onOpenAnalysis?: () => void;
+  onOpenBoardTask?: (taskId: string | number) => void;
   onAddTask?: () => void;
   onAssignTeamMember?: () => void;
   onToggleSubtask?: (taskId: string | number, subtaskId: string) => void;
@@ -95,8 +100,10 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
   error = '',
   onRetry,
   onClose,
+  asideMode = false,
   isProjectOwner = false,
   onOpenAnalysis,
+  onOpenBoardTask,
   onAddTask,
   onAssignTeamMember,
   onToggleSubtask,
@@ -104,6 +111,7 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
   onUploadAttachment
 }) => {
   const [activeTab, setActiveTab] = useState<TaskViewerTab>('overview');
+  const [activeAsideTab, setActiveAsideTab] = useState<TaskAsideTab>('subtasks');
   const [showAllActivity, setShowAllActivity] = useState<boolean>(false);
   const [commentDraft, setCommentDraft] = useState<string>('');
   const [shareCopied, setShareCopied] = useState<boolean>(false);
@@ -126,6 +134,9 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const taskViewerClassName = `${styles['task-viewer-shell']} ${
+    asideMode ? styles['task-viewer-aside'] : ''
+  }`;
 
   useEffect(() => {
     setBoardItems(task?.boardItems || []);
@@ -653,7 +664,7 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
 
   if (loading) {
     return (
-      <div className={styles['task-viewer-shell']} role="status" aria-label="Loading task details">
+      <div className={taskViewerClassName} role="status" aria-label="Loading task details">
         <div className={styles['skeleton-wrap']}>
           <div className={styles['skeleton-bar']} style={{ width: '40%', height: 28 }} />
           <div className={styles['skeleton-bar']} style={{ width: '100%', height: 42 }} />
@@ -663,8 +674,295 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
     );
   }
 
+  if (asideMode && task) {
+    const taskTags = [...(task.tags || [])];
+    const taskCategory = task.category || task.tag;
+    if (taskCategory && !taskTags.includes(taskCategory)) taskTags.push(taskCategory);
+    if (task.priority && task.priority !== 'none' && !taskTags.includes(task.priority)) {
+      taskTags.push(task.priority);
+    }
+    const completedSubtasks = subtasks.filter((subtask) => subtask.done).length;
+
+    return (
+      <div className={`${taskViewerClassName} ${styles['task-aside']}`}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          hidden
+          aria-hidden="true"
+          onChange={handleFileChange}
+        />
+
+        {error && (
+          <div className={styles['state-banner']} role="alert">
+            <span>{error}</span>
+            {onRetry && (
+              <button type="button" onClick={onRetry}>
+                Retry
+              </button>
+            )}
+          </div>
+        )}
+
+        <section className={styles['aside-metadata']} aria-label="Task information">
+          <dl className={styles['aside-metadata-grid']}>
+            <div className={styles['aside-metadata-item']}>
+              <dt>
+                <Circle size={13} />
+                Status
+              </dt>
+              <dd>
+                <span className={styles['aside-status-indicator']} aria-hidden="true" />
+                {task.status || 'To do'}
+              </dd>
+            </div>
+            <div className={styles['aside-metadata-item']}>
+              <dt>
+                <CalendarIcon size={13} />
+                Due date
+              </dt>
+              <dd>
+                {task.due && task.due !== '—'
+                  ? task.due
+                  : formatDate(task.due_date || task.date)}
+              </dd>
+            </div>
+            <div className={styles['aside-metadata-item']}>
+              <dt>
+                <UserCircle2 size={13} />
+                Assignee
+              </dt>
+              <dd className={styles['aside-assignees']}>
+                {assignees.length > 0 ? (
+                  assignees.map((member, index) => (
+                    <span
+                      key={member.firebaseUid || member.firebase_uid || member.email || `${member.name}-${index}`}
+                      className={styles['aside-assignee']}
+                    >
+                      <PersonAvatar person={member} size={20} />
+                      <span>{member.name || member.email || 'Team member'}</span>
+                    </span>
+                  ))
+                ) : (
+                  <span className={styles['aside-muted']}>Unassigned</span>
+                )}
+              </dd>
+            </div>
+            <div className={styles['aside-metadata-item']}>
+              <dt>
+                <Tag size={13} />
+                Tags
+              </dt>
+              <dd className={styles['aside-tags']}>
+                {taskTags.length > 0 ? (
+                  taskTags.map((tag, index) => (
+                    <span
+                      key={`${tag}-${index}`}
+                      className={`${styles['aside-tag']} ${
+                        tag === task.priority ? styles['aside-priority-tag'] : ''
+                      }`}
+                    >
+                      {tag}
+                    </span>
+                  ))
+                ) : (
+                  <span className={styles['aside-muted']}>No tags</span>
+                )}
+              </dd>
+            </div>
+          </dl>
+        </section>
+
+        <section className={styles['aside-section']} aria-labelledby="aside-description-heading">
+          <h3 id="aside-description-heading" className={styles['aside-section-title']}>
+            <FileText size={13} />
+            Description
+          </h3>
+          <p className={styles['aside-description']}>
+            {task.description?.trim() || 'No description provided.'}
+          </p>
+        </section>
+
+        <section className={styles['aside-section']} aria-labelledby="aside-attachments-heading">
+          <div className={styles['aside-section-header']}>
+            <h3 id="aside-attachments-heading" className={styles['aside-section-title']}>
+              <Paperclip size={13} />
+              Attachments ({attachments.length})
+            </h3>
+            <button
+              type="button"
+              className={styles['aside-upload-button']}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Plus size={13} />
+              Attach
+            </button>
+          </div>
+          {attachments.length > 0 ? (
+            <div className={styles['aside-attachments']}>
+              {attachments.map((file, index) => (
+                <div
+                  key={file.id || `${file.name || 'attachment'}-${index}`}
+                  className={styles['aside-attachment']}
+                >
+                  <span className={styles['aside-attachment-icon']} aria-hidden="true">
+                    <FileText size={16} />
+                  </span>
+                  <span className={styles['aside-attachment-info']}>
+                    <strong>{file.name || 'Attachment'}</strong>
+                    <small>{file.size || file.kind || 'File'}</small>
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className={styles['aside-muted']}>No attachments yet.</p>
+          )}
+        </section>
+
+        <div className={styles['aside-tabs-wrap']}>
+          <div className={styles['aside-tabs']} role="tablist" aria-label="Task details">
+            {([
+              ['subtasks', 'Subtasks'],
+              ['comments', 'Comments'],
+              ['activities', 'Activities']
+            ] as const).map(([tab, label]) => (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={activeAsideTab === tab}
+                className={`${styles['aside-tab']} ${
+                  activeAsideTab === tab ? styles['is-active'] : ''
+                }`}
+                onClick={() => setActiveAsideTab(tab)}
+              >
+                {label}
+                {tab === 'comments' && comments.length > 0 && (
+                  <span className={styles['aside-tab-count']}>{comments.length}</span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {activeAsideTab === 'subtasks' && (
+            <section className={styles['aside-tab-panel']} role="tabpanel">
+              <div className={styles['aside-subtask-heading-row']}>
+                <h3 className={styles['aside-subtask-heading']}>
+                  {task.sprint || 'Task checklist'}
+                </h3>
+                {subtasks.length > 0 && (
+                  <span
+                    className={styles['aside-subtask-progress']}
+                    aria-label={`${completedSubtasks} of ${subtasks.length} subtasks complete`}
+                  >
+                    <span
+                      className={styles['aside-subtask-progress-ring']}
+                      aria-hidden="true"
+                      style={{
+                        background: `conic-gradient(var(--blue-600) ${
+                          (completedSubtasks / subtasks.length) * 100
+                        }%, #e8ebf1 0)`
+                      }}
+                    />
+                    {completedSubtasks}/{subtasks.length}
+                  </span>
+                )}
+              </div>
+              {subtasks.length > 0 ? (
+                <div className={styles['aside-subtasks']}>
+                  {subtasks.map((subtask) => (
+                    <div key={subtask.id} className={styles['aside-subtask']}>
+                      <button
+                        type="button"
+                        className={`${styles['aside-checkbox']} ${
+                          subtask.done ? styles['is-checked'] : ''
+                        }`}
+                        aria-label={
+                          subtask.done
+                            ? `Mark ${subtask.title} incomplete`
+                            : `Mark ${subtask.title} complete`
+                        }
+                        onClick={() => onToggleSubtask?.(task.id, subtask.id)}
+                      >
+                        {subtask.done && <Check size={11} strokeWidth={2.5} />}
+                      </button>
+                      <span className={subtask.done ? styles['aside-subtask-done'] : ''}>
+                        {subtask.title}
+                      </span>
+                      {subtask.due && (
+                        <small className={styles['aside-subtask-due']}>{subtask.due}</small>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className={styles['aside-muted']}>No subtasks added yet.</p>
+              )}
+            </section>
+          )}
+
+          {activeAsideTab === 'comments' && (
+            <section className={styles['aside-tab-panel']} role="tabpanel">
+              {comments.length > 0 ? (
+                <div className={styles['aside-comments']}>
+                  {comments.map((comment, index) => (
+                    <article
+                      key={comment.id || index}
+                      className={styles['aside-comment']}
+                    >
+                      <strong>{comment.authorName || comment.author || 'Teammate'}</strong>
+                      <p>{comment.text || comment.body || ''}</p>
+                      <small>{formatActivityTime(comment.createdAt || comment.created_at)}</small>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className={styles['aside-muted']}>No comments yet.</p>
+              )}
+              {onAddComment && (
+                <form className={styles['aside-comment-form']} onSubmit={handleCommentSubmit}>
+                  <input
+                    type="text"
+                    aria-label="Add a comment"
+                    placeholder="Add a comment..."
+                    value={commentDraft}
+                    onChange={(event) => setCommentDraft(event.target.value)}
+                  />
+                  <button type="submit">Post</button>
+                </form>
+              )}
+            </section>
+          )}
+
+          {activeAsideTab === 'activities' && (
+            <section className={styles['aside-tab-panel']} role="tabpanel">
+              {activityItems.map((item) => (
+                <div key={item.id} className={styles['aside-activity']}>
+                  <span className={styles['aside-activity-dot']} aria-hidden="true" />
+                  <span>{item.text}</span>
+                  <small>{item.time}</small>
+                </div>
+              ))}
+              {activityItems.length >= 3 && (
+                <button
+                  type="button"
+                  className={styles['aside-view-all']}
+                  onClick={() => setShowAllActivity((previous) => !previous)}
+                >
+                  {showAllActivity ? 'Show less' : 'View all activity'}
+                </button>
+              )}
+            </section>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={styles['task-viewer-shell']}>
+    <div className={taskViewerClassName}>
       <input
         ref={fileInputRef}
         type="file"
@@ -1458,8 +1756,21 @@ export const TaskDetails: React.FC<TaskDetailsProps> = ({
                             <article
                               key={card.id}
                               draggable
-                              className={`${styles['board-card']} ${draggingCardId === card.id ? styles['is-dragging'] : ''
+                              role={onOpenBoardTask ? 'button' : undefined}
+                              tabIndex={onOpenBoardTask ? 0 : undefined}
+                              className={`${styles['board-card']} ${onOpenBoardTask ? styles['is-clickable'] : ''} ${draggingCardId === card.id ? styles['is-dragging'] : ''
                                 }`}
+                              onClick={() => onOpenBoardTask?.(card.id)}
+                              onKeyDown={(e) => {
+                                if (
+                                  onOpenBoardTask &&
+                                  e.target === e.currentTarget &&
+                                  (e.key === 'Enter' || e.key === ' ')
+                                ) {
+                                  e.preventDefault();
+                                  onOpenBoardTask(card.id);
+                                }
+                              }}
                               onDragStart={(e) => {
                                 e.dataTransfer.setData('text/plain', card.id);
                                 e.dataTransfer.effectAllowed = 'move';

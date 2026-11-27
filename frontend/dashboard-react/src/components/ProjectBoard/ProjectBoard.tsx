@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { X } from 'lucide-react';
 import {
   getSprintMembers,
   normalizeTaskRecord,
@@ -16,6 +17,7 @@ import type {
 } from '../../types/taskViewer';
 import { ProjectOverview } from './ProjectOverview';
 import { TaskDetails } from './TaskDetails';
+import drawerStyles from './TaskDrawer.module.css';
 
 type OverviewTask = TaskItem & { assignees: ProjectMember[] };
 
@@ -119,8 +121,8 @@ export const ProjectBoard: React.FC = () => {
     switchView,
     selectedTaskViewId,
     openFullTaskView,
+    closeFullTaskView,
     selectedSprintView,
-    closeFullSprintView,
     openTaskDetails,
     moveTaskStatus,
     setActiveModal,
@@ -129,6 +131,7 @@ export const ProjectBoard: React.FC = () => {
   } = useDashboard();
 
   const project = activeProject;
+  const taskDrawerRef = useRef<HTMLElement | null>(null);
   const [sprintTasks, setSprintTasks] = useState<OverviewTask[]>([]);
   const [sprintTasksLoading, setSprintTasksLoading] = useState(false);
   const [sprintTasksError, setSprintTasksError] = useState('');
@@ -291,6 +294,52 @@ export const ProjectBoard: React.FC = () => {
   const [subtasksByTask, setSubtasksByTask] = useState<Record<string, TaskSubtask[]>>({});
 
   useEffect(() => {
+    if (selectedTaskViewId === null) return;
+
+    const previousFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    taskDrawerRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeFullTaskView();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusableElements = taskDrawerRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      if (!focusableElements?.length) {
+        event.preventDefault();
+        taskDrawerRef.current?.focus();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      if (!firstElement || !lastElement) return;
+      if (event.shiftKey && document.activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [selectedTaskViewId, closeFullTaskView]);
+
+  useEffect(() => {
     if (selectedTaskViewId === null || !selectedTaskProject?.projectId) {
       setFetchedTask(null);
       setTaskComments([]);
@@ -437,52 +486,87 @@ export const ProjectBoard: React.FC = () => {
     [showDashboardToast]
   );
 
-  if (selectedTaskViewId !== null) {
-    return (
-      <TaskDetails
-        task={activeViewerTask}
-        project={selectedTaskProject}
-        comments={taskComments}
-        loading={taskLoading}
-        error={taskError}
-        onRetry={() => setRetryCounter((n) => n + 1)}
-        isProjectOwner={isCurrentUserProjectCreator}
-        onOpenAnalysis={() => {
-          if (activeViewerTask) openTaskDetails(activeViewerTask.id);
-        }}
-        onAddTask={() => {
-          if (!project) return;
-          setActiveModal({
-            type: 'createTask',
-            projectId: project.projectId
-          });
-        }}
-        onAssignTeamMember={
-          isCurrentUserProjectCreator
-            ? () => {
-                const sprintId = activeViewerTask?.sprintId || activeViewerTask?.sprint_id;
-                if (!selectedTaskProject?.projectId || !sprintId) {
-                  showDashboardToast('This task is not linked to a sprint.', 'error');
-                  return;
-                }
-                setActiveModal({
-                  type: 'assignSprintTask',
-                  projectId: selectedTaskProject.projectId,
-                  sprintId: String(sprintId)
-                });
-              }
-            : undefined
-        }
-        onAddComment={(tid, text) => {
-          void handleAddComment(tid, text);
-        }}
-        onToggleSubtask={handleToggleSubtask}
-        onUploadAttachment={handleUploadAttachment}
-      />
-    );
-  }
+  const taskDrawer = project && selectedTaskViewId !== null ? (
+    <div
+      className={drawerStyles.overlay}
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) closeFullTaskView();
+      }}
+    >
+      <aside
+        ref={taskDrawerRef}
+        className={drawerStyles.panel}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="task-drawer-title"
+        tabIndex={-1}
+      >
+        <header className={drawerStyles.header}>
+          <div className={drawerStyles['title-wrap']}>
+            <span className={drawerStyles['project-name']}>
+              {selectedTaskProject?.name || project.name}
+            </span>
+            <h2 id="task-drawer-title" className={drawerStyles.title}>
+              {activeViewerTask?.title || 'Task details'}
+            </h2>
+          </div>
+          <button
+            type="button"
+            className={drawerStyles['close-button']}
+            aria-label="Close task details"
+            onClick={closeFullTaskView}
+          >
+            <X size={17} />
+          </button>
+        </header>
+        <div className={drawerStyles.content}>
+          <TaskDetails
+            task={activeViewerTask}
+            project={selectedTaskProject}
+            comments={taskComments}
+            loading={taskLoading}
+            error={taskError}
+            onRetry={() => setRetryCounter((n) => n + 1)}
+            asideMode
+            isProjectOwner={isCurrentUserProjectCreator}
+            onOpenAnalysis={() => {
+              if (activeViewerTask) openTaskDetails(activeViewerTask.id);
+            }}
+            onAddTask={() => {
+              setActiveModal({
+                type: 'createTask',
+                projectId: selectedTaskProject?.projectId || project.projectId
+              });
+            }}
+            onAssignTeamMember={
+              isCurrentUserProjectCreator
+                ? () => {
+                    const sprintId = activeViewerTask?.sprintId || activeViewerTask?.sprint_id;
+                    if (!selectedTaskProject?.projectId || !sprintId) {
+                      showDashboardToast('This task is not linked to a sprint.', 'error');
+                      return;
+                    }
+                    setActiveModal({
+                      type: 'assignSprintTask',
+                      projectId: selectedTaskProject.projectId,
+                      sprintId: String(sprintId)
+                    });
+                  }
+                : undefined
+            }
+            onAddComment={(taskId, text) => {
+              void handleAddComment(taskId, text);
+            }}
+            onToggleSubtask={handleToggleSubtask}
+            onUploadAttachment={handleUploadAttachment}
+          />
+        </div>
+      </aside>
+    </div>
+  ) : null;
 
-  if (selectedSprintView?.projectId === project?.projectId && project) {
+  if (selectedSprintView && selectedSprintView.projectId === project?.projectId && project) {
     const sprint = selectedSprintView.sprint;
     const sprintId = sprint.id || sprint.sprintId || '';
     const sprintEndDate =
@@ -504,8 +588,8 @@ export const ProjectBoard: React.FC = () => {
       tag: 'Sprint',
       category: 'Sprint',
       tags: [],
-      due: sprintEndDate || '—',
-      date: sprintEndDate,
+      due: sprintEndDate ? String(sprintEndDate) : '—',
+      date: sprintEndDate ? String(sprintEndDate) : null,
       startDate: sprint.startDate || sprint.start_date || null,
       status,
       priority: 'medium',
@@ -539,33 +623,37 @@ export const ProjectBoard: React.FC = () => {
     };
 
     return (
-      <TaskDetails
-        task={sprintTask}
-        project={project}
-        loading={sprintTasksLoading}
-        error={sprintTasksError}
-        onRetry={() => setSprintTasksRetryCount((count) => count + 1)}
-        isProjectOwner={true}
-        onOpenAnalysis={() => openTaskDetails(sprintTask.id)}
-        onAddTask={() => {
-          setActiveModal({
-            type: 'createTask',
-            projectId: project.projectId,
-            sprintId: String(sprintId)
-          });
-        }}
-        onAssignTeamMember={
-          isCurrentUserProjectCreator
-            ? () => {
-                setActiveModal({
-                  type: 'assignSprintTask',
-                  projectId: project.projectId,
-                  sprintId: String(sprintId)
-                });
-              }
-            : undefined
-        }
-      />
+      <>
+        <TaskDetails
+          task={sprintTask}
+          project={project}
+          loading={sprintTasksLoading}
+          error={sprintTasksError}
+          onRetry={() => setSprintTasksRetryCount((count) => count + 1)}
+          isProjectOwner={true}
+          onOpenAnalysis={() => openTaskDetails(sprintTask.id)}
+          onOpenBoardTask={(taskId) => openFullTaskView(taskId, project.name, true)}
+          onAddTask={() => {
+            setActiveModal({
+              type: 'createTask',
+              projectId: project.projectId,
+              sprintId: String(sprintId)
+            });
+          }}
+          onAssignTeamMember={
+            isCurrentUserProjectCreator
+              ? () => {
+                  setActiveModal({
+                    type: 'assignSprintTask',
+                    projectId: project.projectId,
+                    sprintId: String(sprintId)
+                  });
+                }
+              : undefined
+          }
+        />
+        {taskDrawer}
+      </>
     );
   }
 
@@ -578,35 +666,38 @@ export const ProjectBoard: React.FC = () => {
   }
 
   return (
-    <ProjectOverview
-      project={project}
-      allProjects={projects}
-      tasks={tasks}
-      allTasks={allTasks}
-      canViewTaskMetrics={isCurrentUserProjectCreator}
-      onSelectProject={(projectId) => {
-        const selected = projects.find((item) => item.projectId === projectId);
-        if (selected) switchView(selected.name);
-      }}
-      onOpenProgressAside={(taskId) => openFullTaskView(taskId, project.name)}
-      onToggleTaskDone={(taskId) => {
-        const task = tasks.find((item) => String(item.id) === String(taskId));
-        if (task) {
-          void moveTaskStatus(taskId, task.status === 'Done' ? 'To do' : 'Done');
+    <>
+      <ProjectOverview
+        project={project}
+        allProjects={projects}
+        tasks={tasks}
+        allTasks={allTasks}
+        canViewTaskMetrics={isCurrentUserProjectCreator}
+        onSelectProject={(projectId) => {
+          const selected = projects.find((item) => item.projectId === projectId);
+          if (selected) switchView(selected.name);
+        }}
+        onOpenProgressAside={(taskId) => openFullTaskView(taskId, project.name)}
+        onToggleTaskDone={(taskId) => {
+          const task = tasks.find((item) => String(item.id) === String(taskId));
+          if (task) {
+            void moveTaskStatus(taskId, task.status === 'Done' ? 'To do' : 'Done');
+          }
+        }}
+        onCreateSprint={(projectId) =>
+          setActiveModal({
+            type: 'addSprint',
+            projectId
+          })
         }
-      }}
-      onCreateSprint={(projectId) =>
-        setActiveModal({
-          type: 'addSprint',
-          projectId
-        })
-      }
-      onInviteMembers={(projectId) =>
-        setActiveModal({
-          type: 'inviteCollaborator',
-          projectId
-        })
-      }
-    />
+        onInviteMembers={(projectId) =>
+          setActiveModal({
+            type: 'inviteCollaborator',
+            projectId
+          })
+        }
+      />
+      {taskDrawer}
+    </>
   );
 };
